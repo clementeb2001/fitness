@@ -6,10 +6,11 @@ const path=require('node:path');
 const dir=path.join(__dirname,'..');
 require(path.join(dir,'training.js'));
 const T=globalThis.Training;
-const context={window:{},document:{readyState:'loading',addEventListener(){},getElementById(){return null}},navigator:{},console,Training:T,Date,Math,alert(){},setTimeout,clearTimeout,setInterval,clearInterval};
+const timerStorage=new Map();
+const context={localStorage:{getItem:k=>timerStorage.get(k)||null,setItem:(k,v)=>timerStorage.set(k,v),removeItem:k=>timerStorage.delete(k)},window:{},document:{readyState:'loading',addEventListener(){},getElementById(){return null}},navigator:{},console,Training:T,Date,Math,alert(){},setTimeout,clearTimeout,setInterval,clearInterval};
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(path.join(dir,'previews.js'),'utf8'),context);
-const source=fs.readFileSync(path.join(dir,'app.js'),'utf8').replace('  if (document.readyState', '  window.testAPI={EX,SESSIONS,EQUIP,defaultState,resolveExercise,scaledExercises,sessionsThisWeek,weekStreak,effMods,tickTimer,ef,setState:s=>state=s};\n  if (document.readyState');
+const source=fs.readFileSync(path.join(dir,'app.js'),'utf8').replace('  if (document.readyState', '  window.testAPI={EX,SESSIONS,EQUIP,defaultState,resolveExercise,scaledExercises,sessionsThisWeek,weekStreak,effMods,tickTimer,ef,restoreTimer,persistTimer,stopTimer,setState:s=>state=s};\n  if (document.readyState');
 vm.runInContext(source,context);
 const A=context.window.testAPI;
 test('every catalog exercise has an offline movement preview',()=>{
@@ -70,4 +71,14 @@ test('timer catches up to real elapsed time after background suspension',()=>{
 test('20-minute plans reserve time for warmup and cooldown',()=>{
  const s=A.defaultState();s.sessionMinutes=20;A.setState(s);
  for(const id of Object.keys(A.SESSIONS)){const ex=A.scaledExercises(id);if(!A.SESSIONS[id].conditioning)assert.ok(ex.reduce((sum,k)=>sum+A.resolveExercise(k).exercise.min,0)<=10);}
+});
+
+test('timer restores matching workout deadline and rejects another session or invalid intervals',()=>{
+ const state=A.defaultState();state.currentSession={startedAt:'2026-10-13T10:00:00Z'};A.setState(state);
+ const key='einsatzfit-state-v1-timer';
+ timerStorage.set(key,JSON.stringify({session:state.currentSession.startedAt,mode:'rest',phase:'rest',deadline:Date.now()+45000}));
+ A.restoreTimer();assert.equal(A.ef.running,true);assert.ok(A.ef.left<=45&&A.ef.left>40);A.stopTimer();
+ timerStorage.set(key,JSON.stringify({session:'another',mode:'rest',phase:'rest',deadline:Date.now()+45000}));A.restoreTimer();assert.equal(A.ef.running,false);
+ timerStorage.set(key,JSON.stringify({session:state.currentSession.startedAt,mode:'interval',phase:'work',deadline:Date.now()-1,work:0,rest:0,round:1,rounds:5}));A.restoreTimer();assert.equal(A.ef.running,false);
+ timerStorage.clear();
 });

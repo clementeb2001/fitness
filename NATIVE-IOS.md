@@ -1,70 +1,38 @@
-# EinsatzFit als echte iOS-App (Capacitor)
+# iOS-Vorbereitung mit Capacitor
 
-Die App ist mit **[Capacitor](https://capacitorjs.com/)** so eingerichtet, dass aus
-der bestehenden Web-App eine **echte native iOS-App** wird – App-Icon auf dem
-Home-Bildschirm, Vollbild, native Haptics/Status-Bar, App-Store-fähig.
+Das Repository enthält die Web-App, die Capacitor-Konfiguration und einen geprüften Build für die native JavaScript-Anbindung. **Ein signiertes iOS-Paket und ein auf einem iPhone getestetes Xcode-Projekt sind damit noch nicht erstellt.** `ios/` wird lokal erzeugt und ist nicht eingecheckt.
 
-> **Ehrlich & wichtig:** Den finalen iOS-Build kann **nur ein Mac mit Xcode**
-> erzeugen und signieren (Apple-Vorgabe). Dieses Repo enthält das **komplette
-> Projekt** – auf dem Mac sind es nur wenige Befehle.
+## Lokaler Build
 
-## Was du brauchst
+Voraussetzungen: Node.js 22 oder neuer, pnpm 11.19.0, Mac mit eingerichtetem Xcode. Für Installation und Verteilung gelten Apples aktuelle Anforderungen an Gerät, Signierung und Entwicklerkonto.
 
-| | Zweck | Kosten |
-|---|---|---|
-| **Mac mit Xcode** | iOS-App bauen & signieren | kostenlos (App Store) |
-| **Apple-ID** | App aufs eigene iPhone | kostenlos → läuft **7 Tage**, dann neu laden |
-| **Apple Developer Program** | TestFlight + App Store, dauerhaft | **99 $/Jahr** |
-| **Node.js ≥ 18** | Capacitor-CLI | kostenlos |
-
-Für „nur selbst testen" reicht die **kostenlose Apple-ID** (7-Tage-Limit).
-Für „dauerhaft / verteilen / App Store" brauchst du das **Developer-Programm**.
-
-## Schritte auf dem Mac
-
-```bash
+```sh
 git clone https://github.com/clementeb2001/fitness.git
 cd fitness
-
-npm install            # Capacitor installieren
-npm run ios:add        # Web nach www/ kopieren + natives iOS-Projekt anlegen (einmalig)
-npm run ios:open       # Projekt in Xcode öffnen
+pnpm install --frozen-lockfile
+pnpm test
+pnpm run web:build
+pnpm run ios:add       # einmalig: Xcode-Projekt erzeugen
+pnpm run ios:open
 ```
 
-Nach jeder späteren Web-Änderung:
+Nach Web-Änderungen: `pnpm run ios:sync`.
 
-```bash
-npm run ios:sync       # Web nach www/ kopieren + ins native Projekt übernehmen
-```
+In Xcode Team und Bundle Identifier wählen, das eigene Gerät als Ziel einstellen und den Build signieren. Ein vorhandener Xcode-Lizenzdialog muss vom Benutzer selbst gelesen und akzeptiert werden.
 
-## In Xcode
+## Was tatsächlich eingebunden ist
 
-1. Projekt **App** → Reiter **Signing & Capabilities**.
-2. Bei **Team** deine Apple-ID wählen (einmalig *Add an Account…*).
-3. **Bundle Identifier** `com.einsatzfit.app` – falls belegt, eigene wählen
-   (`com.deinname.einsatzfit`).
-4. iPhone per Kabel anstecken und oben als Ziel wählen.
-5. **▶ Run** – wird gebaut, signiert und aufs iPhone installiert.
-6. Am iPhone einmalig: **Einstellungen → Allgemein → VPN & Geräteverwaltung →**
-   dein Entwickler-Zertifikat **vertrauen**.
+- `native/bridge.js` importiert und registriert Haptics, StatusBar und SplashScreen über die Capacitor-Pakete. Der Build bündelt diese Module und lädt sie **vor** `app.js` in `www/index.html`.
+- Native Aufrufe behandeln Promise-Fehler, statt sie mit einem synchronen `try/catch` zu verlieren. Der Statusleistenstil folgt dem hellen/dunklen App-Design; der auf iOS nicht unterstützte Hintergrundfarben-Aufruf wird dort vermieden.
+- Die PWA bleibt unabhängig von nativen Modulen. Installationstipps und Service Worker werden innerhalb von Capacitor übersprungen.
+- `www/` und `_site/` werden aus derselben Dateiliste erstellt. Der Web-Build erzeugt eine Cache-Kennung aus dem Dateiinhalt.
 
-## Architektur
+## Daten und noch offene native Arbeit
 
-- Die **Web-Dateien im Repo-Root** sind die einzige Quelle. `npm run web:build`
-  (läuft in `ios:add`/`ios:sync` automatisch) kopiert sie nach `www/` – dem
-  Capacitor-Web-Ordner. `www/` und `ios/` sind absichtlich **nicht eingecheckt**
-  (werden lokal erzeugt).
-- Dieselben Dateien liefern die **GitHub-Pages-PWA**
-  (`https://clementeb2001.github.io/fitness/`).
-- Der Service Worker und der „Installieren"-Hinweis werden in der nativen App
-  automatisch übersprungen; Vibration nutzt dort natives Haptik-Feedback.
+Die App verwendet weiterhin `localStorage`. Das bereits deklarierte Preferences-Paket ist **noch nicht als Datenspeicher integriert**. Vor einer nativen Veröffentlichung muss eine migrationssichere native Speicherung implementiert und auf einem Gerät getestet werden. Capacitor weist auf mögliche Bereinigung von Web-Storage durch mobile Betriebssysteme hin: [Preferences-Dokumentation](https://capacitorjs.com/docs/v6/apis/preferences).
 
-## Vorbereitete native Plugins
+Die native App und die Browser-PWA haben getrennte Speicherbereiche. Browserdaten erscheinen nicht automatisch in der iOS-App. JSON-Export/Import ist die vorhandene Übertragungsmöglichkeit; Datei-Export und Import müssen im echten iOS-WebView geprüft werden.
 
-In `package.json`: `@capacitor/haptics`, `@capacitor/status-bar`,
-`@capacitor/splash-screen`, `@capacitor/app`, `@capacitor/preferences`.
+Die von Claude gewählte Capacitor-6-Version bleibt bewusst erhalten. Vor App-Store-Einreichung stehen die Prüfung der aktuellen Apple-/SDK-Anforderungen, ein gegebenenfalls nötiges Capacitor-Upgrade, Datenschutzmanifest, native Icons, Signierung und Gerätetests aus. Dieser Buildtest ersetzt das nicht.
 
-Sinnvolle nächste native Schritte (eigener Ausbau):
-- **Lokale Erinnerungen** (`@capacitor/local-notifications`) – Trainings-Reminder.
-- **Herzfrequenz per Bluetooth** (`@capacitor-community/bluetooth-le`).
-- **Apple Health** – Workouts/Schritte importieren.
+Offizielle Referenzen: [Plugins verwenden](https://capacitorjs.com/docs/v6/basics/using-plugins), [StatusBar](https://capacitorjs.com/docs/v6/apis/status-bar).

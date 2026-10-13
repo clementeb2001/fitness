@@ -26,8 +26,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install locked native build dependencies
+        run: |
+          npm install --global pnpm@11.19.0
+          pnpm install --frozen-lockfile --ignore-scripts
+      - name: Verify native web bundle
+        run: pnpm run web:build
       - name: Verify training logic and preview coverage
-        run: node --test tests/training.test.cjs
+        run: node --test tests/*.test.cjs
 
   deploy:
     needs: test
@@ -45,9 +51,7 @@ jobs:
           enablement: true
 
       - name: Stage static app
-        run: |
-          mkdir _site
-          cp index.html style.css app.js training.js previews.js sw.js manifest.json icon-192.png icon-512.png _site/
+        run: node scripts/web-build.mjs
 
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v3

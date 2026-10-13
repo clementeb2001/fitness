@@ -654,6 +654,7 @@
     const root = document.documentElement;
     if (state.theme === 'auto') root.removeAttribute('data-theme');
     else root.setAttribute('data-theme', state.theme);
+    if(window.EinsatzNative?.isNative())window.EinsatzNative.appearance(state.theme==='dark'||state.theme==='auto'&&matchMedia('(prefers-color-scheme: dark)').matches).catch(()=>{});
   }
 
   /* ----------------------------------------------------------------------
@@ -717,6 +718,7 @@
      Render
      ---------------------------------------------------------------------- */
   function render() {
+    const openPreviews=[...document.querySelectorAll('.session-preview[open]')].map(el=>el.dataset.id);
     const app = document.getElementById('app');
     if (!state.onboarded) { app.innerHTML = renderOnboarding(); window.scrollTo(0,0); return; }
     const r = parseHash();
@@ -727,10 +729,11 @@
       case 'verlauf': html = renderVerlauf(); nav = 'verlauf'; break;
       case 'orte': html = renderOrte(); nav = 'orte'; break;
       case 'einstellungen': html = renderSettings(); nav = 'einstellungen'; break;
-      case 'uebung': html = renderUebung(r.param); nav = 'home'; break;
+      case 'uebung': html = renderUebung(r.param); nav = 'bibliothek'; break;
       default: html = renderDashboard(); nav = 'home';
     }
     app.innerHTML = html + (nav !== null ? renderNav(nav) : '');
+    openPreviews.forEach(id=>{const el=app.querySelector('.session-preview[data-id="'+id+'"]');if(el)el.open=true;});
     ExercisePreview.mount();
     filterLibrary();
     if(state.currentSession)save();
@@ -1073,7 +1076,7 @@
     const finish = '<button class="btn btn--lg btn--block" data-action="finish">Einheit abschließen ✓</button>' +
       '<p class="small muted center" style="margin-top:8px">Alle Eingaben werden automatisch gespeichert.</p>';
 
-    return '<div class="view view--full">'+header+locBar+note+warm+middle+cool+'<div class="card field"><label for="session-notes">Trainingsnotiz</label><textarea id="session-notes" data-field="session-notes" maxlength="2000" placeholder="Technik, Energie, Besonderheiten …">'+esc(s.notes||'')+'</textarea><p class="small muted">RPE: 7 ≈ 3 Wiederholungen übrig · 8 ≈ 2 · 9 ≈ 1 · 10 = Maximum.</p></div>'+finish+'</div>';
+    return '<div class="view view--full">'+header+sessionProgressHTML(s)+locBar+note+warm+middle+cool+'<div class="card field"><label for="session-notes">Trainingsnotiz</label><textarea id="session-notes" data-field="session-notes" maxlength="2000" placeholder="Technik, Energie, Besonderheiten …">'+esc(s.notes||'')+'</textarea><p class="small muted">RPE: 7 ≈ 3 Wiederholungen übrig · 8 ≈ 2 · 9 ≈ 1 · 10 = Maximum.</p></div>'+finish+'</div>';
   }
 
   function stepCard(title, scheme, text, done, action) {
@@ -1122,7 +1125,8 @@
       notice + progLine + io +
       '<div class="ex-actions">' +
       '<a class="btn btn--soft btn--sm" href="#/uebung/'+ex.id+'">Übung ansehen</a>' +
-      '<button class="btn btn--muted btn--sm" data-action="swap" data-id="'+res.plannedId+'">Tauschen</button></div></div>';
+      '<button class="btn btn--muted btn--sm" data-action="swap" data-id="'+res.plannedId+'">Tauschen</button></div>'+
+      '<details class="session-preview" data-id="'+res.plannedId+'"><summary>Bewegung direkt ansehen</summary>'+ExercisePreview.html(ex)+'</details></div>';
   }
 
   function renderNotFound(id) {
@@ -1345,10 +1349,10 @@
     return '<div class="view">' +
       '<div class="topbar"><a class="iconbtn" href="'+(state.currentSession?'#/session/'+state.currentSession.type:'#/bibliothek')+'" aria-label="Zurück zum Training oder zur Bibliothek">‹</a>' +
       '<h1 style="font-size:1.2rem">'+esc(ex.name)+'</h1></div>' +
-      '<div class="card"><div class="seg" role="tablist">' +
-      '<button class="seg-btn '+(tab==='move'?'active':'')+'" role="tab" aria-selected="'+(tab==='move')+'" data-action="detail-tab" data-tab="move">🎬 Bewegung</button>' +
-      '<button class="seg-btn '+(tab==='mus'?'active':'')+'" role="tab" aria-selected="'+(tab==='mus')+'" data-action="detail-tab" data-tab="mus">💪 Muskeln</button>' +
-      '</div>'+visual+'</div>' +
+      '<div class="card"><div class="seg" role="tablist" aria-label="Übung kennenlernen">' +
+      '<button class="seg-btn '+(tab==='move'?'active':'')+'" id="tab-move" role="tab" aria-controls="detail-panel" tabindex="'+(tab==='move'?'0':'-1')+'" aria-selected="'+(tab==='move')+'" data-action="detail-tab" data-tab="move">🎬 Bewegung</button>' +
+      '<button class="seg-btn '+(tab==='mus'?'active':'')+'" id="tab-mus" role="tab" aria-controls="detail-panel" tabindex="'+(tab==='mus'?'0':'-1')+'" aria-selected="'+(tab==='mus')+'" data-action="detail-tab" data-tab="mus">💪 Muskeln</button>' +
+      '</div><div id="detail-panel" role="tabpanel" tabindex="0" aria-labelledby="tab-'+tab+'">'+visual+'</div></div>' +
       '<div class="card stack"><div><h3 style="margin-bottom:6px">Schema</h3>' +
       '<p class="tnum" style="margin:0">'+ex.sets+' Sätze × '+esc(ex.reps)+'</p>'+prLine+'</div>' +
       '<div class="tags">'+eqTags+loadTags+'</div></div>' +
@@ -1361,6 +1365,31 @@
      Events
      ---------------------------------------------------------------------- */
   var libraryQuery='', libraryFilter='all', chartExercise='', detailTab='move';
+  function sessionProgressHTML(s) {
+    const entries=s.planned.map(id=>s.entries[id]||{});
+    const sets=entries.flatMap(e=>e.setLog||[]),done=sets.filter(x=>x.done).length;
+    const conditioning=SESSIONS[s.type].conditioning?1:0,total=sets.length+conditioning,completed=done+(s.condDone?1:0);
+    const volume=entries.reduce((n,e)=>n+Training.volume(e,EX[e.exerciseId]),0);
+    return '<section class="card session-progress" aria-label="Trainingsfortschritt"><div class="row-between"><strong>'+completed+' / '+total+' '+(conditioning?'Blöcke & Sätze':'Sätze')+'</strong><span class="small muted">'+Math.round(volume).toLocaleString('de-DE')+' kg Volumen</span></div><progress max="'+Math.max(1,total)+'" value="'+completed+'" aria-label="Abgeschlossene Sätze"></progress><p class="small muted">'+(completed===total&&total?'Alles erfasst – du kannst die Einheit abschließen.':'Satz für Satz. Deine Eingaben werden gespeichert.')+'</p></section>';
+  }
+  function persistTimer() {
+    try {
+      if(!ef.running||!state?.currentSession){localStorage.removeItem(KEY+'-timer');return;}
+      const {mode,phase,deadline,work,rest,rounds,round}=ef;
+      localStorage.setItem(KEY+'-timer',JSON.stringify({session:state.currentSession.startedAt,mode,phase,deadline,work,rest,rounds,round}));
+    } catch(e) {/* Training data save reports storage errors separately. */}
+  }
+  function restoreTimer() {
+    try {
+      const t=JSON.parse(localStorage.getItem(KEY+'-timer')||'null');
+      if(!state.currentSession||!t||t.session!==state.currentSession.startedAt)return;
+      if(!['rest','interval'].includes(t.mode)||!['rest','work'].includes(t.phase)||!Number.isFinite(t.deadline)||Math.abs(t.deadline-Date.now())>86400000)return;
+      if(t.mode==='interval'&&(!Number.isInteger(t.round)||!Number.isInteger(t.rounds)||t.round<1||t.rounds<t.round||t.rounds>100||!(t.work>0&&t.work<=3600)||!(t.rest>=0&&t.rest<=3600)))return;
+      Object.assign(ef,{mode:t.mode,phase:t.phase,deadline:t.deadline,work:t.work,rest:t.rest,rounds:t.rounds,round:t.round,running:true});tickTimer();
+      if(ef.running)ef.iv=setInterval(tickTimer,1000);
+    } catch(e) {/* A broken timer must never prevent restoring a workout. */}
+  }
+
   function quickAdaptHTML() {
     return '<div class="card"><div class="row-between"><h3>Heute weniger Zeit?</h3><span class="pill pill--steel">Dein Rhythmus</span></div><p class="small muted">Dauer vor dem Start wählen. Die nächste Einheit passt sich an.</p><div class="chips">'+[20,30,45,60,75].map(n=>'<button class="chip" aria-pressed="'+(state.sessionMinutes===n)+'" data-action="quick-duration" data-minutes="'+n+'">'+n+' Min</button>').join('')+'</div><a class="library-link" href="#/bibliothek">Alle Übungen & Bewegungsvorschauen →</a></div>';
   }
@@ -1421,13 +1450,13 @@
   function onClick(ev) {
     const el = ev.target.closest('[data-action]'); if (!el) return;
     const a = el.getAttribute('data-action');
-    if(['set-loc','toggle-complaint','toggle-loc-equip','remove-loc','set-readiness'].includes(a) && state.currentSession && Object.values(state.currentSession.entries).some(e=>e.setLog?.some(x=>x.done))){alert('Beende zuerst die laufende Einheit, damit deine bereits erfassten Sätze erhalten bleiben.');return;}
+    if(['set-loc','toggle-complaint','toggle-loc-equip','remove-loc','set-readiness'].includes(a) && state.currentSession && Object.values(state.currentSession.entries).some(e=>e.setLog?.some(x=>x.done||x.weight!==''||x.reps!==''||x.rpe!==''))){alert('Beende zuerst die laufende Einheit, damit deine erfassten Satzwerte erhalten bleiben.');return;}
     switch (a) {
       case 'onb-next': onboardStep = Math.min(5, onboardStep+1); render(); break;
       case 'onb-back': onboardStep = Math.max(1, onboardStep-1); render(); break;
       case 'onb-finish': state.onboarded = true; save(); onboardStep = 1; location.hash = '#/'; render(); break;
 
-      case 'detail-tab': detailTab = el.getAttribute('data-tab'); render(); break;
+      case 'detail-tab': detailTab = el.getAttribute('data-tab'); render(); document.getElementById('tab-'+detailTab)?.focus({preventScroll:true}); break;
 
       case 'cycle-theme': {
         state.theme = state.theme==='auto'?'dark':state.theme==='dark'?'light':'auto';
@@ -1489,7 +1518,7 @@
         if (efDeferredPrompt) { efDeferredPrompt.prompt(); efDeferredPrompt.userChoice.finally(function () { efDeferredPrompt = null; render(); }); }
         break;
       }
-      case 'swap': {const pid=el.getAttribute('data-id');if(state.currentSession?.entries[pid]?.setLog?.some(x=>x.done)&&!confirm('Beim Tausch werden die Sätze dieser Übung zurückgesetzt. Fortfahren?'))break;swapExercise(pid);if(state.currentSession)state.currentSession.entries[pid]={};save();render();break;}
+      case 'swap': {const pid=el.getAttribute('data-id');if(state.currentSession?.entries[pid]?.setLog?.some(x=>x.done||x.weight!==''||x.reps!==''||x.rpe!=='')&&!confirm('Beim Tausch werden die Sätze dieser Übung zurückgesetzt. Fortfahren?'))break;swapExercise(pid);if(state.currentSession)state.currentSession.entries[pid]={};save();render();break;}
       case 'finish': finishSession(); break;
 
       case 'set-readiness': state.readiness = { date: todayStr(), level: el.getAttribute('data-level') }; save(); render(); break;
@@ -1522,7 +1551,7 @@
         break;
       }
       case 'reset-all': {
-        if (confirm('Wirklich ALLE Daten löschen und neu beginnen?')) { localStorage.removeItem(KEY); state = defaultState(); onboardStep = 1; applyTheme(); location.hash = '#/'; render(); }
+        if (confirm('Wirklich ALLE Daten löschen und neu beginnen?')) { stopTimer();localStorage.removeItem(KEY); state = defaultState(); onboardStep = 1; applyTheme(); location.hash = '#/'; render(); }
         break;
       }
     }
@@ -1550,6 +1579,7 @@
   }
 
   function onKey(ev) {
+    if(ev.target.matches('[role="tab"]')&&['ArrowLeft','ArrowRight','Home','End'].includes(ev.key)){ev.preventDefault();detailTab=ev.key==='Home'?'move':ev.key==='End'?'mus':detailTab==='move'?'mus':'move';render();document.getElementById('tab-'+detailTab).focus({preventScroll:true});return;}
     if (ev.key !== 'Enter' && ev.key !== ' ' && ev.key !== 'Spacebar') return;
     const el = ev.target.closest('[role="checkbox"][data-action]');
     if (el) { ev.preventDefault(); el.click(); }
@@ -1576,12 +1606,13 @@
       '<button class="ef-btn" data-t="add">+15</button>' +
       '<button class="ef-btn ef-stop" data-t="stop" aria-label="Timer stoppen">■</button>' +
       '</div></div>' +
-      '<div class="ef-intv"><span class="ef-lbl">Intervall</span>' +
+      '<details class="timer-options"><summary>Intervalltraining</summary><div class="ef-intv"><span class="ef-lbl">Intervall</span>' +
       '<button class="ef-btn" data-t="intv" data-w="20" data-r="10" data-n="8">20/10 ×8</button>' +
       '<button class="ef-btn" data-t="intv" data-w="40" data-r="20" data-n="8">40/20 ×8</button>' +
       '<button class="ef-btn" data-t="intv" data-w="60" data-r="0" data-n="10">EMOM ×10</button>' +
-      '</div>';
+      '</div></details>';
     document.body.appendChild(el);
+    if(window.ResizeObserver)new ResizeObserver(()=>document.documentElement.style.setProperty('--timer-height',el.getBoundingClientRect().height+'px')).observe(el);
     el.addEventListener('click', onTimerClick);
     return el;
   }
@@ -1605,11 +1636,10 @@
     } catch (e) {}
   }
   function buzz(ms) {
-    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Haptics) {
-      try { window.Capacitor.Plugins.Haptics.impact({ style: 'MEDIUM' }); return; } catch (e) {}
-    }
-    if (navigator.vibrate) { try { navigator.vibrate(ms || 120); } catch (e) {} }
+    if(window.EinsatzNative?.isNative()) {window.EinsatzNative.haptic().catch(()=>{});return;}
+    if(navigator.vibrate){try{navigator.vibrate(ms||120);}catch(e){}}
   }
+
   function doneSignal() { beep(1047, 0.22); setTimeout(function () { beep(1319, 0.28); }, 180); buzz(300); }
 
   function onTimerClick(ev) {
@@ -1617,23 +1647,25 @@
     ensureAudio();
     var t = b.getAttribute('data-t');
     if (t === 'rest') startRest(parseInt(b.getAttribute('data-s'), 10));
-    else if (t === 'add') { ef.left += 15; ef.deadline=(ef.deadline || Date.now())+15000; if (!ef.running) { ef.running = true; ef.mode = 'rest'; ef.phase = 'rest'; startTick(); } updateTimer(); }
+    else if (t === 'add') {if(ef.running){tickTimer();}if(ef.running){ef.deadline+=15000;ef.left=Math.max(0,Math.ceil((ef.deadline-Date.now())/1000));persistTimer();updateTimer();}else startRest(15);}
     else if (t === 'stop') stopTimer();
     else if (t === 'intv') startInterval(+b.getAttribute('data-w'), +b.getAttribute('data-r'), +b.getAttribute('data-n'));
   }
 
-  function startTick() { ef.deadline=Date.now()+ef.left*1000; clearInterval(ef.iv); updateTimer(); ef.iv = setInterval(tickTimer, 1000); }
+  function startTick() { ef.deadline=Date.now()+ef.left*1000; clearInterval(ef.iv); persistTimer(); updateTimer(); ef.iv = setInterval(tickTimer, 1000); }
   function startRest(sec) { ef.mode = 'rest'; ef.phase = 'rest'; ef.left = sec; ef.running = true; beep(660, 0.08); buzz(60); startTick(); }
   function startInterval(work, rest, rounds) {
     ef.mode = 'interval'; ef.work = work; ef.rest = rest; ef.rounds = rounds; ef.round = 1; ef.phase = 'work'; ef.left = work; ef.running = true;
     beep(880, 0.18); buzz(150); startTick();
   }
-  function stopTimer() { ef.running = false; clearInterval(ef.iv); ef.iv = null; ef.left = 0; ef.mode = 'rest'; ef.phase = 'idle'; updateTimer(); }
+  function stopTimer() { ef.running = false; clearInterval(ef.iv); ef.iv = null; ef.left = 0; ef.mode = 'rest'; ef.phase = 'idle'; persistTimer(); updateTimer(); }
 
   function tickTimer() {
     if (!ef.running) return;
+    const previousPhase=ef.phase,previousRound=ef.round;
     while(ef.running && Date.now()>=ef.deadline){const deadline=ef.deadline;onPhaseEnd();ef.deadline=deadline+ef.left*1000;}
     if(ef.running)ef.left=Math.max(0,Math.ceil((ef.deadline-Date.now())/1000));
+    if(previousPhase!==ef.phase||previousRound!==ef.round)persistTimer();
     updateTimer();
   }
   function onPhaseEnd() {
@@ -1680,10 +1712,8 @@
   function isIOS() { return /iphone|ipad|ipod/i.test(navigator.userAgent); }
   function isNative() { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); }
   function nativeInit() {
-    if (!isNative() || !window.Capacitor || !window.Capacitor.Plugins) return;
-    var P = window.Capacitor.Plugins;
-    try { if (P.StatusBar) { P.StatusBar.setStyle({ style: 'DARK' }); P.StatusBar.setBackgroundColor({ color: '#0e1622' }); } } catch (e) {}
-    try { if (P.SplashScreen) P.SplashScreen.hide(); } catch (e) {}
+    if(!window.EinsatzNative?.isNative())return;
+    window.EinsatzNative.hideSplash().catch(()=>{});
   }
 
   function toastDOM() {
@@ -1743,13 +1773,15 @@
      ---------------------------------------------------------------------- */
   function init() {
     state = load();
+    restoreTimer();
     applyTheme();
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>{if(state.theme==='auto')applyTheme();});
     const app = document.getElementById('app');
     app.addEventListener('click', onClick);
     app.addEventListener('input', onInput);
     app.addEventListener('change', onChange);
     app.addEventListener('keydown', onKey);
-    window.addEventListener('hashchange', ()=>{render();window.scrollTo(0,0);});
+    window.addEventListener('hashchange', ()=>{detailTab='move';render();window.scrollTo(0,0);});
     document.addEventListener('visibilitychange',()=>{if(!document.hidden&&ef.running)tickTimer();});
 
     window.addEventListener('beforeinstallprompt', function (e) {

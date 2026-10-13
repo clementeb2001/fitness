@@ -1,21 +1,13 @@
-// Kopiert die statische Web-App (Repo-Root) in den Capacitor-Web-Ordner www/.
-// Gleiche Dateiliste wie der GitHub-Pages-Deploy (_site) – eine Quelle der Wahrheit.
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { build } from 'esbuild';
+import { root, buildWeb } from './web-build.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const files = [
-  'index.html', 'style.css', 'app.js', 'training.js', 'previews.js',
-  'manifest.json', 'sw.js', 'icon-192.png', 'icon-512.png'
-];
+// Bundle plugin imports first: missing dependencies must not destroy the last build.
+const bundle = await build({ entryPoints: [path.join(root, 'native/bridge.js')], bundle: true, write: false, format: 'iife', target: 'safari15', minify: true });
 const out = path.join(root, 'www');
-
-fs.rmSync(out, { recursive: true, force: true });
-fs.mkdirSync(out, { recursive: true });
-for (const f of files) {
-  const src = path.join(root, f);
-  if (!fs.existsSync(src)) { console.error('Fehlt:', f); process.exit(1); }
-  fs.copyFileSync(src, path.join(out, f));
-}
-console.log('Web → www/ (' + files.length + ' Dateien kopiert)');
+await buildWeb(out);
+await fs.writeFile(path.join(out, 'native-bridge.js'), bundle.outputFiles[0].contents);
+const html = await fs.readFile(path.join(out, 'index.html'), 'utf8');
+await fs.writeFile(path.join(out, 'index.html'), html.replace('<script src="app.js">', '<script src="native-bridge.js"></script>\n  <script src="app.js">'));
+console.log('Web + native Plugin-Bridge → www/');
