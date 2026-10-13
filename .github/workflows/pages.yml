@@ -19,7 +19,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify training logic and preview coverage
+        run: node --test tests/training.test.cjs
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -33,10 +44,15 @@ jobs:
         with:
           enablement: true
 
+      - name: Stage static app
+        run: |
+          mkdir _site
+          cp index.html style.css app.js training.js previews.js sw.js manifest.json icon-192.png icon-512.png _site/
+
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: '.'
+          path: '_site'
 
       - name: Deploy to GitHub Pages
         id: deployment

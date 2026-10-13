@@ -4,7 +4,7 @@
    Kernideen:
    - ORTE mit eigenem Material (Wache / Zuhause / Unterwegs ...) – vor jeder
      Einheit wählbar; der Plan passt sich dem Material des Ortes an.
-   - Tägliche BESCHWERDEN -> automatische sichere Ersatz-Übungen (Kaskade).
+   - Tägliche BESCHWERDEN -> automatische Ersatz-Übungen (Kaskade).
    - Voll einstellbar: Einheiten/Woche UND Dauer pro Einheit (Plan skaliert).
    - Schwerpunkt Polizei/Feuerwehr, Ski als leichter Winter-Zusatz.
    ========================================================================= */
@@ -113,7 +113,7 @@
   /* ----------------------------------------------------------------------
      Übungsdatenbank
      equipment: "mindestens eines davon nötig" ([] = nur Körpergewicht).
-     loads: belastete Regionen. alternatives: sichere Ausweichkette.
+     loads: belastete Regionen. alternatives: mögliche Ausweichkette.
      min: geschätzte Minuten (für Dauer-Skalierung).
      ---------------------------------------------------------------------- */
   const EX = {
@@ -312,6 +312,27 @@
   /* ----------------------------------------------------------------------
      Session-Typen & Wochenplan
      ---------------------------------------------------------------------- */
+  // Conservative load filters, not a clinical assessment.
+  EX.box_squat.loads = ['knie'];
+  EX.wall_pushup.loads = ['schulter', 'handgelenk', 'ellenbogen'];
+  EX.inverted_row.loads = ['schulter', 'ellenbogen'];
+  EX.db_row.loads = ['ruecken', 'schulter', 'ellenbogen'];
+  EX.band_row.loads = ['schulter', 'ellenbogen'];
+  EX.face_pull.loads = ['schulter'];
+  EX.band_pullapart.loads = ['schulter'];
+  EX.iso_curl.loads = ['ellenbogen', 'handgelenk'];
+  EX.squat_thrust.loads = ['knie', 'handgelenk', 'schulter'];
+  EX.bird_dog.loads = ['handgelenk', 'knie', 'schulter'];
+  EX.side_plank_knee.loads = ['schulter'];
+  EX.hanging_knee_raise.loads = ['schulter', 'ellenbogen'];
+  EX.calf_raise.loads = ['sprunggelenk'];
+  EX.single_leg_balance.loads = ['sprunggelenk'];
+  EX.farmers_carry.loads = ['ruecken', 'schulter', 'handgelenk'];
+  EX.suitcase_carry.loads = ['ruecken', 'schulter', 'handgelenk'];
+  EX.ruck_carry.loads = ['ruecken', 'knie', 'sprunggelenk'];
+  EX.jumping_jack.loads = ['knie', 'sprunggelenk', 'schulter'];
+  EX.bench_press.requires=['box']; EX.hip_thrust.requires=['box']; EX.split_squat.requires=['box']; EX.box_squat.requires=['box'];
+
   const SESSIONS = {
     KRAFT_A: { id:'KRAFT_A', name:'Kraft · Unterkörper & Tragen', short:'Kraft UK', icon:'🏋️',
       tags:['Kraft','Tragen','Core'], ex:['back_squat','deadlift','split_squat','farmers_carry','hanging_knee_raise','calf_raise'] },
@@ -368,7 +389,8 @@
   function defaultState() {
     const locs = defaultLocations();
     return {
-      version: 1,
+      version: 2,
+      favorites: [],
       onboarded: false,
       name: '',
       locations: locs,
@@ -393,17 +415,13 @@
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
-      if (!raw) return defaultState();
-      const p = JSON.parse(raw);
-      const d = defaultState();
-      const merged = Object.assign(d, p);
-      merged.complaints = Object.assign(d.complaints, p.complaints || {});
-      if (!merged.locations || !merged.locations.length) { merged.locations = d.locations; merged.activeLocationId = d.activeLocationId; }
-      if (!merged.activeLocationId || !merged.locations.some(function (l) { return l.id === merged.activeLocationId; })) {
-        merged.activeLocationId = merged.locations[0].id;
-      }
-      return merged;
-    } catch (e) { return defaultState(); }
+      return raw ? Training.normalize(JSON.parse(raw), defaultState(), EX, SESSIONS, EQUIP) : defaultState();
+    } catch (e) {
+      // Preserve unreadable data for recovery instead of silently overwriting it.
+      try { const raw=localStorage.getItem(KEY); if(raw) localStorage.setItem(KEY+'-recovery-'+Date.now(),raw); } catch (_) {}
+      alert('Gespeicherte Daten konnten nicht vollständig gelesen werden. Eine Wiederherstellungskopie bleibt auf diesem Gerät, sofern Speicher verfügbar ist.');
+      return defaultState();
+    }
   }
 
   function save() {
@@ -421,7 +439,6 @@
   function esc(v) {
     return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
-  function ytLink(name) { return 'https://www.youtube.com/results?search_query=' + encodeURIComponent(name + ' Übung Technik'); }
   function isWinter() { return WINTER_MONTHS.indexOf(new Date().getMonth()) !== -1; }
   function activeLocation() { return state.locations.find(function (l) { return l.id === state.activeLocationId; }) || state.locations[0]; }
   function availableEquip() { const loc = activeLocation(); return (loc && loc.equipment) ? loc.equipment : []; }
@@ -438,11 +455,9 @@
 
   // jüngste erfasste Leistung für eine Übung (history ist neueste zuerst)
   function lastPerfFor(exId) {
-    for (var i = 0; i < state.history.length; i++) {
-      var h = state.history[i]; if (!h.exercises) continue;
-      for (var j = 0; j < h.exercises.length; j++) {
-        if (h.exercises[j].id === exId) return { weight: h.exercises[j].weight, reps: h.exercises[j].doneReps, rpe: h.exercises[j].rpe, date: h.date };
-      }
+    for (const h of [...state.history].sort((a,b)=>b.date.localeCompare(a.date))) {
+      const e=(h.exercises||[]).find(e=>e.id===exId);
+      if(e && Training.completed(e).length) return {...e,date:h.date};
     }
     return null;
   }
@@ -464,19 +479,13 @@
 
   // Vorschlag fürs nächste Gewicht aus letzter Leistung + Tagesform
   function suggestNext(ex) {
-    const lp = lastPerfFor(ex.id); if (!lp) return null;
-    const lastW = parseFloat(lp.weight);
-    if (isNaN(lastW) || lastW <= 0) return { repeat: true, text: (lp.reps ? lp.reps + ' Wdh.' : 'erledigt') };
-    const top = parseTopReps(ex.reps); const lastR = parseInt(lp.reps, 10); const mods = effMods();
-    var next;
-    if (mods.load < 1) next = roundKg(lastW * mods.load);
-    else if (!isNaN(lastR) && top && lastR >= top) next = lastW + incFor(ex.id);
-    else next = lastW;
-    return { last: lastW, lastReps: lp.reps, next: next, up: next > lastW, down: next < lastW };
+    const lp=lastPerfFor(ex.id);
+    return lp ? Training.suggestion(ex,lp,effMods().load) : null;
   }
 
   // Geschätztes 1RM (Epley) und Bestwerte (PRs)
-  function epley(w, r) { w = parseFloat(w); r = parseInt(r, 10); if (isNaN(w) || w <= 0 || isNaN(r) || r <= 0) return 0; return w * (1 + r / 30); }
+  function epley(w,r,id) { return Training.oneRM(w,r,EX[id]); }
+
   function round1(x) { return Math.round(x * 10) / 10; }
   // bisheriger Bestwert für Übung, optional bis zu einem Index (exklusiv) der History
   function prFor(exId, beforeIdx) {
@@ -485,8 +494,7 @@
       var h = state.history[i]; if (!h.exercises) continue;
       for (var j = 0; j < h.exercises.length; j++) {
         var e = h.exercises[j]; if (e.id !== exId) continue;
-        var w = parseFloat(e.weight); if (!isNaN(w) && w > maxW) maxW = w;
-        var o = epley(e.weight, e.doneReps); if (o > best1) best1 = o;
+        Training.completed(e).forEach(x=>{var w=Number(x.weight);if(w>maxW)maxW=w;var o=epley(x.weight,x.reps,e.id);if(o>best1)best1=o;});
       }
     }
     return { maxW: maxW, best1: best1 };
@@ -496,6 +504,7 @@
      Adaptions-Logik
      ---------------------------------------------------------------------- */
   function conflictOf(ex) {
+    if(ex.requires?.some(k=>!availableEquip().includes(k)))return 'Zusätzlich benötigt: '+ex.requires.map(k=>EQUIP[k].label).join(', ');
     if (ex.equipment && ex.equipment.length) {
       const avail = availableEquip();
       const ok = ex.equipment.some(function (e) { return avail.indexOf(e) !== -1; });
@@ -539,7 +548,7 @@
     }
     return { exercise: EX[startId], plannedId: plannedId, replaced: false, swapped: swapped,
       reason: swapped ? 'Manuell getauscht' : null,
-      warning: 'Keine sichere Alternative (' + startConflict + '). Bewegungsradius reduzieren, bei Schmerz abbrechen.' };
+      warning: 'Keine passende Alternative (' + startConflict + '). Diese Übung auslassen; bei Beschwerden fachlich abklären.' };
   }
 
   function swapExercise(plannedId) {
@@ -554,40 +563,21 @@
      Dauer-Skalierung & Plan
      ---------------------------------------------------------------------- */
   function scaledExercises(type) {
-    const st = SESSIONS[type];
-    if (st.conditioning) return st.ex.slice(); // Core-Finisher; Hauptblock separat
-    const avail = Math.max(10, state.sessionMinutes - 10); // Warm/Cool reservieren
-    const chosen = []; var total = 0;
-    for (var i = 0; i < st.ex.length; i++) {
-      const m = EX[st.ex[i]].min || 5;
-      if (chosen.length < 3 || total + m <= avail) { chosen.push(st.ex[i]); total += m; }
-      else break;
-    }
-    // Autoregulation / Deload: Übungszahl reduzieren (min. 3)
-    const mods = effMods();
-    const target = Math.max(3, chosen.length + mods.count);
-    return chosen.slice(0, Math.min(chosen.length, target));
+    const st=SESSIONS[type];
+    if(st.conditioning)return state.sessionMinutes>=35?st.ex.slice():[];
+    const budget=state.sessionMinutes-10,chosen=[];let used=0;
+    for(const id of st.ex){const ex=resolveExercise(id).exercise;const duration=ex.min||5;if(used+duration<=budget){chosen.push(id);used+=duration;}}
+    const target=Math.max(1,chosen.length+effMods().count);
+    return chosen.slice(0,target);
   }
 
   function conditioningPlan() {
-    const minutes = state.sessionMinutes;
-    const avail = availableEquip();
-    const knee = state.complaints.knie;
-    const ankle = state.complaints.sprunggelenk;
-    if (avail.indexOf('cardio') !== -1) {
-      return { title: 'Cardio-Intervalle (Gerät)', detail: minutes + ' Min am Cardiogerät: 5 Min locker einrudern/-fahren, dann ' +
-        '6–8 × (1 Min zügig / 1 Min locker), 5 Min auslaufen.' };
-    }
-    if (avail.indexOf('rucksack') !== -1 && !knee) {
-      return { title: 'Rucking (Marsch mit Last)', detail: minutes + ' Min zügiger Marsch mit beladenem Rucksack, ' +
-        'wenn möglich mit Steigungen/Treppen (einsatznah). Aufrechte Haltung, Rumpf aktiv.' };
-    }
-    if (knee || ankle) {
-      return { title: 'Zügiges Gehen (gelenkschonend)', detail: minutes + ' Min zügiges Gehen in gleichmäßigem Tempo – ' +
-        'wegen Gelenkthema kein Laufen/Springen.' };
-    }
-    return { title: 'Lauf-Intervalle', detail: 'Gesamt ca. ' + minutes + ' Min: 5 Min locker einlaufen, dann ' +
-      '6 × (2 Min zügig / 1 Min gehen), 5 Min auslaufen. Tempo nach Gefühl.' };
+    const core=state.sessionMinutes>=35?8:0;
+    const minutes=Math.max(10,state.sessionMinutes-10-core);
+    const avail=availableEquip(),comp=activeComplaints();
+    if(avail.includes('cardio'))return {title:'Cardio nach Tagesform',detail:minutes+' Min am passenden Cardiogerät, zusätzlich 5 Min Aufwärmen und 5 Min Abwärmen. Lockeres Grundtempo; bei guter Tagesform im Mittelteil kurze zügige Abschnitte mit gleich langer lockerer Erholung. Bei Beschwerden nur schmerzfreie Bewegung.'};
+    if(avail.includes('rucksack')&&!comp.length)return {title:'Rucking · Marsch mit Last',detail:minutes+' Min gleichmäßiger Marsch mit gut sitzendem Rucksack. Last moderat wählen; zusätzlich 5 Min Aufwärmen und 5 Min Abwärmen.'};
+    return {title:comp.length?'Lockere Ausdauer nach Verträglichkeit':'Laufen / zügiges Gehen',detail:minutes+' Min im kontrollierten Tempo, zusätzlich 5 Min Aufwärmen und 5 Min Abwärmen. '+(comp.length?'Nur wenn schmerzfrei möglich; sonst den Ausdauerblock auslassen.':'Sprechen sollte noch möglich sein. Gehpausen nach Bedarf.')};
   }
 
   /* ----------------------------------------------------------------------
@@ -598,7 +588,8 @@
 
   function sessionsThisWeek() {
     const mon = mondayOf(new Date());
-    return state.history.filter(function (h) { return dateObj(h.date) >= mon; }).length;
+    const end=new Date(mon); end.setDate(end.getDate()+7);
+    return state.history.filter(h=>dateObj(h.date)>=mon && dateObj(h.date)<end && h.date<=todayStr()).length;
   }
   function weekStreak() {
     var streak = 0;
@@ -608,7 +599,7 @@
       var end = new Date(start); end.setDate(end.getDate() + 7);
       var count = state.history.filter(function (h) { var d = dateObj(h.date); return d >= start && d < end; }).length;
       if (count >= state.frequency) streak++;
-      else break;
+      else if (w > 0) break;
     }
     return streak;
   }
@@ -630,43 +621,30 @@
   }
 
   function finishSession() {
-    const s = state.currentSession; if (!s) return;
-    const st = SESSIONS[s.type];
-    const exercises = [];
-    var volume = 0, doneCount = 0, prs = [];
-    if (!st.conditioning) {
-      s.planned.forEach(function (pid) {
-        const r = resolveExercise(pid); const e = s.entries[pid] || {};
-        const rec = { id:r.exercise.id, name:r.exercise.name, sets:r.exercise.sets, reps:r.exercise.reps, weight:e.weight||'', doneReps:e.reps||'', rpe:e.rpe||'' };
-        exercises.push(rec);
-        if (e.done) doneCount++;
-        const w = parseFloat(e.weight), rp = parseInt(e.reps, 10);
-        if (!isNaN(w) && w > 0 && !isNaN(rp) && rp > 0) volume += w * rp;
-        // PR? gegen bisherige History (vor dem Hinzufügen)
-        if (!isNaN(w) && w > 0) {
-          const prev = prFor(r.exercise.id);
-          const e1 = epley(e.weight, e.reps);
-          if (w > prev.maxW || (e1 > 0 && e1 > prev.best1)) {
-            prs.push({ name: r.exercise.name, weight: w, reps: e.reps, e1rm: round1(e1) });
-            rec.pr = true;
-          }
-        }
-      });
-    } else if (s.condDone) { doneCount = 1; }
-
-    state.history.unshift({
-      id: uid(), date: todayStr(), type: s.type, typeName: st.name,
-      location: (activeLocation() || {}).name || '', minutes: state.sessionMinutes,
-      exercises: exercises,
-      conditioning: st.conditioning ? conditioningPlan().detail : null
+    const s=state.currentSession;if(!s)return;
+    const st=SESSIONS[s.type], exercises=[], prs=[];
+    let volume=0,doneCount=0;
+    s.planned.forEach(pid=>{
+      const r=resolveExercise(pid),e=s.entries[pid];
+      if(!e || r.warning)return;
+      const ex=EX[e.exerciseId]||r.exercise;
+      const sets=(e.setLog||[]).filter(x=>x.done && Training.validSet(x,ex));
+      if(!sets.length)return;
+      const best=sets.reduce((a,b)=>Number(b.weight)>Number(a.weight)?b:a,sets[0]);
+      const bestRM=Math.max(...sets.map(x=>epley(x.weight,x.reps,ex.id)));
+      const prev=prFor(ex.id);
+      const rec={id:ex.id,name:ex.name,sets:sets.length,targetSets:e.setLog.length,reps:ex.reps,weight:best.weight,doneReps:best.reps,rpe:best.rpe,setLog:sets};
+      rec.pr=Number(best.weight)>prev.maxW || bestRM>prev.best1;
+      if(rec.pr)prs.push({name:ex.name,weight:Number(best.weight),reps:best.reps,e1rm:round1(bestRM)});
+      volume+=Training.volume(rec,ex);doneCount++;exercises.push(rec);
     });
-    state.lastSummary = {
-      typeName: st.name, icon: st.icon, minutes: state.sessionMinutes,
-      doneCount: doneCount, total: st.conditioning ? 1 : s.planned.length,
-      volume: Math.round(volume), prs: prs, conditioning: !!st.conditioning
-    };
-    state.currentSession = null; state.swaps = {};
-    save(); location.hash = '#/'; render();
+    if(!doneCount && !s.condDone){alert('Hake mindestens einen ausgeführten Satz oder den Ausdauerblock ab. Leere Einheiten werden nicht als Training gezählt.');return;}
+    const incomplete=s.planned.some(pid=>(s.entries[pid]?.setLog||[]).some(x=>!x.done));
+    if(incomplete && !confirm('Es sind noch Sätze offen. Nur die abgeschlossenen Sätze speichern und die Einheit beenden?'))return;
+    const minutes=Math.max(1,Math.round((Date.now()-Date.parse(s.startedAt))/60000));
+    state.history.unshift({id:uid(),date:todayStr(),type:s.type,typeName:st.name,location:(activeLocation()||{}).name||'',minutes,exercises,volume:Math.round(volume),notes:s.notes||'',conditioning:s.condDone?conditioningPlan().detail:null});
+    state.lastSummary={typeName:st.name,icon:st.icon,minutes,doneCount:doneCount+(s.condDone?1:0),total:s.planned.length+(st.conditioning?1:0),volume:Math.round(volume),prs,conditioning:!!st.conditioning};
+    state.currentSession=null;state.swaps={};stopTimer();save();location.hash='#/';render();
   }
 
   /* ----------------------------------------------------------------------
@@ -706,16 +684,15 @@
         if (!obj || typeof obj !== 'object' || !Array.isArray(obj.history) || !Array.isArray(obj.locations)) {
           alert('Ungültige Backup-Datei.'); return;
         }
+        Training.normalize(obj, defaultState(), EX, SESSIONS, EQUIP);
         if (!confirm('Backup laden? Deine aktuellen Daten werden vollständig ersetzt.')) return;
-        const d = defaultState();
-        state = Object.assign(d, obj);
-        state.complaints = Object.assign(d.complaints, obj.complaints || {});
-        if (!state.locations.length) { state.locations = d.locations; state.activeLocationId = d.locations[0].id; }
-        if (!state.locations.some(function (l) { return l.id === state.activeLocationId; })) state.activeLocationId = state.locations[0].id;
+        state = Training.normalize(obj, defaultState(), EX, SESSIONS, EQUIP);
+        stopTimer();
         save(); applyTheme(); editLocationId = null; editingHistoryId = null;
         location.hash = '#/'; render(); alert('Backup geladen.');
       } catch (e) { alert('Datei konnte nicht gelesen werden.'); }
     };
+    if(file.size>10*1024*1024){alert('Backup ist zu groß (max. 10 MB).');return;}
     fr.readAsText(file);
   }
 
@@ -728,7 +705,7 @@
     if (!parts.length) return { route: 'home' };
     if (parts[0] === 'session') return { route: 'session', param: parts[1] };
     if (parts[0] === 'uebung') return { route: 'uebung', param: parts[1] };
-    if (['verlauf','orte','einstellungen'].indexOf(parts[0]) !== -1) return { route: parts[0] };
+    if (['verlauf','orte','einstellungen','bibliothek'].indexOf(parts[0]) !== -1) return { route: parts[0] };
     return { route: 'home' };
   }
 
@@ -746,6 +723,7 @@
     var html, nav;
     switch (r.route) {
       case 'session': html = renderSession(r.param); nav = null; break;
+      case 'bibliothek': html = renderLibrary(); nav = 'bibliothek'; break;
       case 'verlauf': html = renderVerlauf(); nav = 'verlauf'; break;
       case 'orte': html = renderOrte(); nav = 'orte'; break;
       case 'einstellungen': html = renderSettings(); nav = 'einstellungen'; break;
@@ -753,7 +731,9 @@
       default: html = renderDashboard(); nav = 'home';
     }
     app.innerHTML = html + (nav !== null ? renderNav(nav) : '');
-    window.scrollTo(0, 0);
+    ExercisePreview.mount();
+    filterLibrary();
+    if(state.currentSession)save();
     if (r.route === 'verlauf') drawChart();
     showTimer(r.route === 'session');
   }
@@ -766,6 +746,7 @@
     return '<nav class="bottom-nav" aria-label="Hauptnavigation"><div class="inner">' +
       item('#/','home','🎯','Heute') +
       item('#/verlauf','verlauf','📈','Verlauf') +
+      item('#/bibliothek','bibliothek','▤','Übungen') +
       item('#/orte','orte','📍','Orte') +
       item('#/einstellungen','einstellungen','⚙️','Einstellung') +
       '</div></nav>';
@@ -796,7 +777,7 @@
         '<button class="btn" data-action="onb-next">Weiter</button></div>';
     } else if (onboardStep === 3) {
       body = '<h2>Aktuelle Beschwerden?</h2>' +
-        '<p class="muted small">Mehrfachauswahl. Betroffene Übungen werden automatisch durch sichere ' +
+        '<p class="muted small">Mehrfachauswahl. Betroffene Übungen werden automatisch durch andere ' +
         'Alternativen ersetzt. Nichts ist vorausgewählt – du kannst das jeden Tag neu setzen.</p>' +
         complaintTogglesHTML() +
         '<div class="field"><label for="ob-ct">Sonstige Beschwerden (optional)</label>' +
@@ -960,7 +941,7 @@
       '</div>' +
       '<div class="tags" style="margin-bottom:14px">'+st.tags.map(function (t){return '<span class="tag">'+esc(t)+'</span>';}).join('')+'</div>' +
       (resume ? '<p class="small" style="margin:0 0 10px"><span class="pill pill--orange">Laufende Einheit</span> '+esc(SESSIONS[resume.type].name)+'</p>' : '') +
-      '<a class="btn btn--lg btn--block" href="#/session/'+type+'">Einheit starten  ▸</a></div>';
+      '<a class="btn btn--lg btn--block" href="#/session/'+(resume?resume.type:type)+'">'+(resume?'Training fortsetzen':'Einheit starten')+' ▸</a></div>';
 
     const stats = '<div class="statgrid">' +
       '<div class="stat"><b class="tnum">'+thisWeek+'<span class="unit">/'+goal+'</span></b><span>Diese Woche</span></div>' +
@@ -1011,10 +992,11 @@
         '<span class="small muted">Material passt sich an</span></div>'+locSwitch+'</div>' +
 
       hero +
+      quickAdaptHTML() +
       stats +
 
       '<div class="card"><div class="row-between" style="margin-bottom:10px"><h3 style="margin:0">Tagesbefinden</h3>'+readinessPill+'</div>' +
-      '<p class="small muted" style="margin:0 0 10px">Tippe an, was heute zwickt – der Plan baut betroffene Übungen sicher um.</p>' +
+      '<p class="small muted" style="margin:0 0 10px">Tippe an, was heute zwickt – der Plan sucht nach passenden Alternativen. Bei Schmerzen abbrechen.</p>' +
       compChips + complaintNote + '</div>' +
 
       readinessCardHTML() +
@@ -1038,8 +1020,9 @@
   /* ---------- Session ---------- */
   function renderSession(type) {
     const st = SESSIONS[type];
-    if (!st) return renderNotFound(type);
-    if (!state.currentSession || state.currentSession.type !== type) { state.currentSession = newSession(type); save(); }
+    if (!Object.hasOwn(SESSIONS,type)) return renderNotFound(type);
+    if(state.currentSession && state.currentSession.type!==type) return '<div class="view"><h1>Training läuft noch</h1><div class="card"><p>Deine bisherigen Sätze bleiben erhalten.</p><a class="btn" href="#/session/'+state.currentSession.type+'">Fortsetzen</a><button class="btn btn--crit" data-action="discard-session">Laufende Einheit verwerfen</button></div></div>';
+    if (!state.currentSession) { state.currentSession = newSession(type); save(); }
     const s = state.currentSession;
     const loc = activeLocation();
 
@@ -1063,11 +1046,11 @@
       const plan = conditioningPlan();
       middle = '<div class="exercise '+(s.condDone?'done':'')+'">' +
         '<div class="head"><div class="grow"><div class="num">Hauptteil</div><h3>'+esc(plan.title)+'</h3>' +
-        '<div class="scheme">'+state.sessionMinutes+' Min</div></div>' +
+        '<div class="scheme">Gesamtziel '+state.sessionMinutes+' Min inkl. Auf-/Abwärmen</div></div>' +
         checkEl(s.condDone, 'Kondition erledigt', 'toggle-cond', '') + '</div>' +
         '<p class="small" style="margin-top:10px">'+esc(plan.detail)+'</p></div>';
       s.planned.forEach(function (pid, idx) {
-        middle += exerciseCard(resolveExercise(pid), s.entries[pid], 'Finisher ' + (idx+1), false);
+        middle += exerciseCard(resolveExercise(pid), s.entries[pid], 'Finisher ' + (idx+1), true);
       });
     } else {
       middle = s.planned.map(function (pid, idx) {
@@ -1090,7 +1073,7 @@
     const finish = '<button class="btn btn--lg btn--block" data-action="finish">Einheit abschließen ✓</button>' +
       '<p class="small muted center" style="margin-top:8px">Alle Eingaben werden automatisch gespeichert.</p>';
 
-    return '<div class="view view--full">'+header+locBar+note+warm+middle+cool+finish+'</div>';
+    return '<div class="view view--full">'+header+locBar+note+warm+middle+cool+'<div class="card field"><label for="session-notes">Trainingsnotiz</label><textarea id="session-notes" data-field="session-notes" maxlength="2000" placeholder="Technik, Energie, Besonderheiten …">'+esc(s.notes||'')+'</textarea><p class="small muted">RPE: 7 ≈ 3 Wiederholungen übrig · 8 ≈ 2 · 9 ≈ 1 · 10 = Maximum.</p></div>'+finish+'</div>';
   }
 
   function stepCard(title, scheme, text, done, action) {
@@ -1112,7 +1095,7 @@
 
     // Autoregulation: effektive Satzzahl
     const mods = effMods();
-    const effSets = Math.max(2, ex.sets + mods.set);
+    const effSets = Math.max(1, ex.sets + mods.set);
     const setsNote = (mods.set < 0) ? ' <span class="faint small">(angepasst)</span>' : '';
 
     // Progression: "letztes Mal" + Vorschlag
@@ -1125,23 +1108,17 @@
         } else {
           const arrow = sg.up ? '↑' : (sg.down ? '↓' : '→');
           progLine = '<div class="last-line">Letztes Mal: <b>'+fmtKg(sg.last)+' kg</b>'+(sg.lastReps?' × '+esc(sg.lastReps):'') +
-            ' <button class="sug" data-action="apply-suggest" data-id="'+res.plannedId+'" data-w="'+sg.next+'">Vorschlag '+fmtKg(sg.next)+' kg '+arrow+'</button></div>';
+            ' <button class="sug" data-action="apply-suggest" data-id="'+res.plannedId+'" data-w="'+sg.next+'">Vorschlag '+fmtKg(sg.next)+' kg '+arrow+'</button><p class="small muted">'+esc(sg.reason)+'</p></div>';
         }
       }
     }
 
-    const io = withIO ? '<div class="io-fields">' +
-      '<div class="field"><label for="w-'+res.plannedId+'">Gewicht kg</label>' +
-      '<input id="w-'+res.plannedId+'" type="number" inputmode="decimal" min="0" step="0.5" value="'+esc(entry.weight)+'" data-field="weight" data-id="'+res.plannedId+'" placeholder="–"></div>' +
-      '<div class="field"><label for="r-'+res.plannedId+'">Wdh.</label>' +
-      '<input id="r-'+res.plannedId+'" type="number" inputmode="numeric" min="0" step="1" value="'+esc(entry.reps)+'" data-field="reps" data-id="'+res.plannedId+'" placeholder="–"></div>' +
-      '<div class="field" style="flex:.7"><label for="rpe-'+res.plannedId+'">RPE</label>' +
-      '<input id="rpe-'+res.plannedId+'" type="number" inputmode="decimal" min="0" max="10" step="0.5" value="'+esc(entry.rpe)+'" data-field="rpe" data-id="'+res.plannedId+'" placeholder="–"></div></div>' : '';
+    const io = withIO && !res.warning ? setRowsHTML(res,entry,effSets) : '';
 
     return '<div class="exercise '+(entry.done?'done':'')+'">' +
       '<div class="head"><div class="grow"><div class="num">'+esc(num)+'</div><h3>'+esc(ex.name)+'</h3>' +
       '<div class="scheme">'+effSets+' × '+esc(ex.reps)+setsNote+'</div></div>' +
-      checkEl(entry.done, ex.name+' erledigt', 'toggle-ex', res.plannedId)+'</div>' +
+      '<span class="pill pill--steel">'+(entry.setLog?entry.setLog.filter(x=>x.done).length:0)+' / '+(entry.setLog?entry.setLog.length:effSets)+' Sätze</span></div>' +
       notice + progLine + io +
       '<div class="ex-actions">' +
       '<a class="btn btn--soft btn--sm" href="#/uebung/'+ex.id+'">Übung ansehen</a>' +
@@ -1165,11 +1142,13 @@
         '<p class="small">Starte dein erstes Training über „Heute" – danach erscheint hier dein Fortschritt.</p>' +
         '<a class="btn" href="#/">Zur Übersicht</a></div></div>';
     }
+    if(!state.history.some(h=>h.exercises.some(e=>e.id===chartExercise)))chartExercise=state.history.flatMap(h=>h.exercises)[0]?.id||'';
     const series = chartSeries();
     const alt = series.length ? series.map(function (p){ return formatDate(p.date)+': '+p.max+' kg'; }).join(' · ') : 'Noch keine Gewichtsdaten.';
-    const chart = '<div class="card"><h3>Maximalgewicht pro Einheit</h3>' +
+    const ids=[...new Set(state.history.flatMap(h=>h.exercises.map(e=>e.id)))];
+    const chart = '<div class="card"><h3>Fortschritt pro Übung</h3><label for="chart-exercise">Übung wählen</label><select id="chart-exercise">'+ids.map(id=>'<option value="'+id+'" '+(id===chartExercise?'selected':'')+'>'+esc(EX[id].name)+'</option>').join('')+'</select>' +
       (series.length
-        ? '<div class="chart-wrap"><canvas id="chart" width="520" height="190" role="img" aria-label="Verlauf des Maximalgewichts pro Einheit. '+esc(alt)+'"></canvas></div>'
+        ? '<div class="chart-wrap"><canvas id="chart" width="520" height="190" role="img" aria-label="Verlauf des Gewichts dieser Übung. '+esc(alt)+'"></canvas></div>'
         : '<p class="muted small">Trag bei Übungen Gewichte ein – dann erscheint hier die Kurve.</p>') +
       '<p class="small muted">'+esc(alt)+'</p></div>';
 
@@ -1178,7 +1157,7 @@
     state.history.forEach(function (h) {
       (h.exercises || []).forEach(function (e) {
         var w = parseFloat(e.weight); if (isNaN(w) || w <= 0) return;
-        var o = epley(e.weight, e.doneReps);
+        var o = prFor(e.id).best1;
         if (!prMap[e.id]) prMap[e.id] = { name: e.name, maxW: 0, best1: 0 };
         if (w > prMap[e.id].maxW) prMap[e.id].maxW = w;
         if (o > prMap[e.id].best1) prMap[e.id].best1 = o;
@@ -1191,16 +1170,16 @@
       ? '<div class="card"><h3>🏆 Bestwerte</h3>'+prArr.map(function (p){
           return '<div class="row-between" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><span>'+esc(p.name)+'</span>' +
             '<span class="small tnum"><b>'+fmtKg(p.maxW)+' kg</b>'+(p.best1>0?' · ≈1RM '+round1(p.best1):'')+'</span></div>';
-        }).join('')+'<p class="small faint" style="margin:8px 0 0">1RM geschätzt (Epley-Formel) aus Gewicht × Wiederholungen.</p></div>'
+        }).join('')+'<p class="small faint" style="margin:8px 0 0">1RM geschätzt (Epley), nur für 1–12 Wiederholungen; keine Zeit- oder Distanzübungen.</p></div>'
       : '';
 
     const items = state.history.map(function (h) {
       var lines;
-      if (h.type === 'CONDITION') lines = '<ul><li>'+esc(h.conditioning || 'Ausdauereinheit')+'</li></ul>';
-      else lines = '<ul>'+h.exercises.map(function (e) {
-        var d = []; if (e.weight) d.push(e.weight+' kg'); if (e.doneReps) d.push(e.doneReps+' Wdh.');
-        return '<li>'+esc(e.name)+(e.pr?' 🏆':'')+(d.length?' – '+esc(d.join(', ')):' – '+e.sets+'×'+e.reps)+'</li>';
+      lines = '<ul>'+h.exercises.map(function (e) {
+        var d = []; if (e.weight) d.push(e.weight+' kg'); if (e.doneReps) d.push(e.doneReps+' '+Training.unit(EX[e.id]));
+        return '<li>'+esc(e.name)+(e.setLog?' · '+e.setLog.length+' Sätze: '+e.setLog.map(x=>esc((x.weight||'0')+' kg × '+x.reps+' '+Training.unit(EX[e.id]))).join(' / '):'')+(e.pr?' 🏆':'')+(d.length?' – '+esc(d.join(', ')):' – '+e.sets+'×'+e.reps)+'</li>';
       }).join('')+'</ul>';
+      if(h.conditioning)lines='<p>'+esc(h.conditioning)+'</p>'+lines;
 
       var edit;
       if (editingHistoryId === h.id) {
@@ -1219,7 +1198,7 @@
 
       return '<div class="card history-item">' +
         '<div class="meta"><h3 style="margin:0">'+(SESSIONS[h.type]?SESSIONS[h.type].icon+' ':'')+esc(h.typeName)+'</h3>' +
-        '<span class="small muted tnum">'+formatDate(h.date)+'</span></div>'+metaTags+lines+edit+'</div>';
+        '<span class="small muted tnum">'+formatDate(h.date)+'</span></div>'+metaTags+lines+(h.notes?'<p class="small muted">Notiz: '+esc(h.notes)+'</p>':'')+edit+'</div>';
     }).join('');
 
     return '<div class="view">'+header+chart+prCard+items+'</div>';
@@ -1227,7 +1206,7 @@
 
   function chartSeries() {
     return state.history.slice().reverse().map(function (h) {
-      const w = (h.exercises||[]).map(function (e){ return parseFloat(e.weight); }).filter(function (v){ return !isNaN(v) && v>0; });
+      const w = (h.exercises||[]).filter(e=>e.id===chartExercise).flatMap(e=>Training.completed(e).map(x=>Number(x.weight))).filter(v=>v>0);
       return { date:h.date, max: w.length ? Math.max.apply(null, w) : 0 };
     }).filter(function (p){ return p.max > 0; });
   }
@@ -1301,7 +1280,7 @@
       '<p class="small muted" style="margin:10px 0 0">Startet nach jedem abgehakten Satz automatisch. 0 = aus.</p></div></div>' +
 
       '<div class="card"><h3>Beschwerden</h3>' +
-      '<p class="small muted" style="margin-bottom:10px">Betroffene Übungen werden automatisch sicher ersetzt. ' +
+      '<p class="small muted" style="margin-bottom:10px">Betroffene Übungen werden nach den hinterlegten Belastungen gefiltert. Das ist keine medizinische Freigabe. ' +
       'Du kannst das auch direkt auf dem Dashboard pro Tag setzen.</p>' +
       complaintTogglesHTML() +
       '<div class="field"><label for="ct">Sonstige Beschwerden</label>' +
@@ -1325,6 +1304,7 @@
       'z. B. vor einem Handywechsel oder App-Update.</p>' +
       '<div class="btn-row">' +
       '<button class="btn btn--soft" data-action="export-data">⤓ Backup-Datei</button>' +
+      '<button class="btn btn--soft" data-action="export-csv">⤓ Sätze als CSV</button>' +
       '<button class="btn btn--muted" data-action="copy-data">Kopieren</button></div>' +
       '<label class="btn btn--ghost btn--block" for="importFile" style="margin-top:10px">⤒ Backup laden (Import)</label>' +
       '<input type="file" id="importFile" accept="application/json,.json" class="hidden">' +
@@ -1342,7 +1322,7 @@
 
   /* ---------- Übungsdetail ---------- */
   function renderUebung(id) {
-    const ex = EX[id]; if (!ex) return renderNotFound(id);
+    const ex = Object.hasOwn(EX,id) ? EX[id] : null; if (!ex) return renderNotFound(id);
     const eqTags = (ex.equipment && ex.equipment.length)
       ? '<span class="tag">benötigt: '+ex.equipment.map(function (e){ return EQUIP[e]?EQUIP[e].label:e; }).join(' / ')+'</span>'
       : '<span class="tag">kein Gerät nötig</span>';
@@ -1356,8 +1336,9 @@
         (pr.best1>0?'<span class="small muted tnum">≈ 1RM '+round1(pr.best1)+' kg</span>':'')+'</div>'
       : '';
     return '<div class="view">' +
-      '<div class="topbar"><a class="iconbtn" href="#/" aria-label="Zurück">‹</a>' +
+      '<div class="topbar"><a class="iconbtn" href="'+(state.currentSession?'#/session/'+state.currentSession.type:'#/bibliothek')+'" aria-label="Zurück zum Training oder zur Bibliothek">‹</a>' +
       '<h1 style="font-size:1.2rem">'+esc(ex.name)+'</h1></div>' +
+      '<div class="card">'+ExercisePreview.html(ex)+'</div>' +
       '<div class="card"><div class="row-between" style="margin-bottom:4px"><h3 style="margin:0">Beanspruchte Muskeln</h3>' +
       '<span style="font-size:1.6rem">'+(ex.emoji||'💪')+'</span></div>' +
       bodyDiagram(id) +
@@ -1366,17 +1347,75 @@
       '<div><h3 style="margin-bottom:6px">Schema</h3><p class="tnum" style="margin:0">'+ex.sets+' Sätze × '+esc(ex.reps)+'</p>'+prLine+'</div>' +
       '<div class="tags">'+eqTags+loadTags+'</div></div>' +
       '<div class="card"><h3>So geht’s</h3>'+steps+coach+'</div>' +
-      '<div class="card stack"><p class="small muted">Kurzes Technik-Video? Öffnet eine YouTube-Suche (kein eigenes Hosting).</p>' +
-      '<a class="btn btn--ghost btn--block" href="'+ytLink(ex.name)+'" target="_blank" rel="noopener">▶ Auf YouTube suchen</a></div>' +
+      exerciseHistoryHTML(id) +
       '</div>';
   }
 
   /* ----------------------------------------------------------------------
      Events
      ---------------------------------------------------------------------- */
+  var libraryQuery='', libraryFilter='all', chartExercise='';
+  function quickAdaptHTML() {
+    return '<div class="card"><div class="row-between"><h3>Heute weniger Zeit?</h3><span class="pill pill--steel">Dein Rhythmus</span></div><p class="small muted">Dauer vor dem Start wählen. Die nächste Einheit passt sich an.</p><div class="chips">'+[20,30,45,60,75].map(n=>'<button class="chip" aria-pressed="'+(state.sessionMinutes===n)+'" data-action="quick-duration" data-minutes="'+n+'">'+n+' Min</button>').join('')+'</div><a class="library-link" href="#/bibliothek">Alle Übungen & Bewegungsvorschauen →</a></div>';
+  }
+  function ensureSets(res,entry,count) {
+    const ex=res.exercise;
+    if(entry.exerciseId!==ex.id && entry.exerciseId){entry.setLog=null;entry.done=false;entry.weight='';entry.reps='';entry.rpe='';}
+    entry.exerciseId=ex.id;
+    if(!Array.isArray(entry.setLog)||!entry.setLog.length){
+      // Legacy entries contain one observed set, not proof that all prescribed sets were done.
+      entry.setLog=Array.from({length:count},(_,i)=>({weight:i===0?entry.weight||'':'',reps:i===0?entry.reps||'':'',rpe:i===0?entry.rpe||'':'',done:i===0&&entry.done===true&&Number(entry.reps)>0}));
+    }
+    entry.done=entry.setLog.every(x=>x.done);
+    return entry.setLog;
+  }
+  function setRowsHTML(res,entry,count) {
+    const rows=ensureSets(res,entry,count),id=res.plannedId,unit=Training.unit(res.exercise),lp=lastPerfFor(res.exercise.id);
+    const previous=lp?Training.completed(lp):[];
+    return '<div class="set-table"><div class="set-heading"><span>Satz</span><span>kg</span><span>'+unit+'</span><span>RPE</span><span>✓</span></div>'+rows.map((row,i)=>{
+      const prefix=id+'-'+i;
+      const field=(key,label,min,max,step)=>'<input aria-label="'+esc(res.exercise.name)+' Satz '+(i+1)+' '+label+'" type="number" inputmode="decimal" min="'+min+'" max="'+max+'" step="'+step+'" value="'+esc(row[key])+'" data-field="'+key+'" data-id="'+id+'" data-set="'+i+'" '+(row.done?'readonly':'')+' placeholder="'+esc(previous[i]?.[key]||'–')+'">';
+      return '<div class="set-row '+(row.done?'is-done':'')+'"><span class="tnum">'+(i+1)+'</span>'+field('weight','Gewicht in Kilogramm',0,1000,0.5)+field('reps',unit,1,10000,unit==='Wdh.'?1:0.5)+field('rpe','RPE (optional)',1,10,0.5)+'<button class="set-check" aria-label="Satz '+(i+1)+' '+esc(res.exercise.name)+' erledigt" aria-pressed="'+row.done+'" data-action="toggle-set" data-id="'+id+'" data-set="'+i+'">'+(row.done?'✓':'○')+'</button></div>';
+    }).join('')+'</div><div class="btn-row"><button class="btn btn--muted btn--sm" data-action="add-set" data-id="'+id+'" '+(rows.length>=12?'disabled':'')+'>＋ Satz</button><button class="btn btn--muted btn--sm" data-action="remove-set" data-id="'+id+'" '+(rows.length<=1||rows[rows.length-1].done?'disabled':'')+'>− Letzter Satz</button></div>'+(previous.length?'<p class="small muted">Letztes Training '+esc(formatDate(lp.date))+': '+previous.map(x=>esc((x.weight||'0')+' kg × '+x.reps+' '+unit)).join(' · ')+'</p>':'')+'<p class="small faint">'+(/Seite/.test(res.exercise.reps)?'Wert pro Seite eingeben. ':'')+'Bei Eigengewicht kann kg leer bleiben.</p>';
+  }
+  function toggleSet(el) {
+    const e=state.currentSession?.entries[el.dataset.id],row=e?.setLog?.[Number(el.dataset.set)];if(!row)return;
+    const ex=EX[e.exerciseId];
+    if(!row.done&&!Training.validSet(row,ex)){alert('Bitte einen gültigen Wert für '+Training.unit(ex)+' eintragen. Gewicht: 0–1000 kg; RPE optional: 1–10.');return;}
+    row.done=!row.done;e.done=e.setLog.every(x=>x.done);save();
+    if(row.done&&state.restDefault>0){ensureAudio();startRest(state.restDefault);}
+    const y=window.scrollY;render();window.scrollTo(0,y);
+    document.querySelector('[data-action="toggle-set"][data-id="'+el.dataset.id+'"][data-set="'+el.dataset.set+'"]')?.focus({preventScroll:true});
+  }
+  function renderLibrary() {
+    return '<div class="view"><div class="topbar"><div><p class="eyebrow">Lernen & entdecken</p><h1>Deine Übungsbibliothek</h1></div></div><div class="card"><label for="exercise-search">Übung, Muskel oder Gerät suchen</label><input id="exercise-search" type="search" value="'+esc(libraryQuery)+'" placeholder="z. B. Kniebeuge, Rücken, Band"><label for="exercise-filter">Auswahl</label><select id="exercise-filter">'+[['all','Alle Übungen'],['available','Mit meinem Material'],['favorites','Meine Favoriten'],['bodyweight','Ohne Geräte']].map(([v,l])=>'<option value="'+v+'" '+(libraryFilter===v?'selected':'')+'>'+l+'</option>').join('')+'</select><p id="library-count" class="small muted" aria-live="polite"></p></div><div id="library-results">'+Object.values(EX).map(ex=>'<article class="card library-item" data-exercise="'+ex.id+'"><div class="row-between"><div><span class="eyebrow">'+esc(ex.target)+'</span><h3><a href="#/uebung/'+ex.id+'">'+esc(ex.name)+'</a></h3></div><button class="iconbtn" data-action="favorite" data-id="'+ex.id+'" aria-label="'+esc(ex.name)+' als Favorit" aria-pressed="'+state.favorites.includes(ex.id)+'">'+(state.favorites.includes(ex.id)?'★':'☆')+'</button></div><p class="small muted">'+(ex.equipment.length?ex.equipment.map(e=>esc(EQUIP[e]?.label||e)).join(' / '):'Eigengewicht')+'</p><a class="btn btn--soft btn--sm" href="#/uebung/'+ex.id+'">▶ Bewegung & Anleitung</a></article>').join('')+'</div><div id="library-empty" class="card" hidden>Keine passende Übung. Versuche einen anderen Suchbegriff oder Filter.</div></div>';
+  }
+  function filterLibrary() {
+    let count=0;
+    document.querySelectorAll('[data-exercise]').forEach(el=>{
+      const ex=EX[el.dataset.exercise],hay=[ex.name,ex.target,...ex.equipment.map(k=>EQUIP[k]?.label||k)].join(' ').toLocaleLowerCase('de');
+      const fits=libraryFilter==='all'||libraryFilter==='favorites'&&state.favorites.includes(ex.id)||libraryFilter==='bodyweight'&&!ex.equipment.length||libraryFilter==='available'&&(!ex.equipment.length||ex.equipment.some(k=>availableEquip().includes(k)))&&(!ex.requires||ex.requires.every(k=>availableEquip().includes(k)));
+      el.hidden=!(fits&&hay.includes(libraryQuery.trim().toLocaleLowerCase('de')));if(!el.hidden)count++;
+    });
+    const el=document.getElementById('library-count');if(el)el.textContent=count+' von '+Object.keys(EX).length+' Übungen';
+    const empty=document.getElementById('library-empty');if(empty)empty.hidden=count>0;
+  }
+  function exerciseHistoryHTML(id) {
+    const records=state.history.filter(h=>h.exercises.some(e=>e.id===id)).slice(0,8);
+    return '<div class="card"><h3>Dein Verlauf für diese Übung</h3>'+(records.length?records.map(h=>'<div class="exercise-history"><strong>'+esc(formatDate(h.date))+'</strong><span>'+h.exercises.filter(e=>e.id===id).flatMap(e=>Training.completed(e)).map(x=>esc((x.weight||'0')+' kg × '+x.reps+' '+Training.unit(EX[id]))).join(' · ')+'</span></div>').join(''):'<p class="small muted">Nach dem ersten protokollierten Satz siehst du hier deine Entwicklung.</p>')+'</div>';
+  }
+  function exportCSV() {
+    const rows=[['Datum','Einheit','Übung','Satz','kg','Wert','Einheit des Werts','RPE','Notiz']];
+    state.history.forEach(h=>h.exercises.forEach(e=>Training.completed(e).forEach((x,i)=>rows.push([h.date,h.typeName,e.name,i+1,x.weight,x.reps,Training.unit(EX[e.id]),x.rpe,h.notes||'']))));
+    const cell=v=>'"'+String(v??'').replace(/^\s*[=+@-]/,"' $&").replace(/"/g,'""')+'"';
+    const blob=new Blob(['\uFEFF'+rows.map(r=>r.map(cell).join(';')).join('\r\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download='einsatzfit-saetze-'+todayStr()+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
+
   function onClick(ev) {
     const el = ev.target.closest('[data-action]'); if (!el) return;
     const a = el.getAttribute('data-action');
+    if(['set-loc','toggle-complaint','toggle-loc-equip','remove-loc','set-readiness'].includes(a) && state.currentSession && Object.values(state.currentSession.entries).some(e=>e.setLog?.some(x=>x.done))){alert('Beende zuerst die laufende Einheit, damit deine bereits erfassten Sätze erhalten bleiben.');return;}
     switch (a) {
       case 'onb-next': onboardStep = Math.min(5, onboardStep+1); render(); break;
       case 'onb-back': onboardStep = Math.max(1, onboardStep-1); render(); break;
@@ -1442,22 +1481,30 @@
         if (efDeferredPrompt) { efDeferredPrompt.prompt(); efDeferredPrompt.userChoice.finally(function () { efDeferredPrompt = null; render(); }); }
         break;
       }
-      case 'swap': swapExercise(el.getAttribute('data-id')); render(); break;
+      case 'swap': {const pid=el.getAttribute('data-id');if(state.currentSession?.entries[pid]?.setLog?.some(x=>x.done)&&!confirm('Beim Tausch werden die Sätze dieser Übung zurückgesetzt. Fortfahren?'))break;swapExercise(pid);if(state.currentSession)state.currentSession.entries[pid]={};save();render();break;}
       case 'finish': finishSession(); break;
 
       case 'set-readiness': state.readiness = { date: todayStr(), level: el.getAttribute('data-level') }; save(); render(); break;
       case 'apply-suggest': {
         const pid = el.getAttribute('data-id'); const wv = el.getAttribute('data-w');
-        if (state.currentSession && state.currentSession.entries[pid]) { state.currentSession.entries[pid].weight = wv; save(); render(); }
+        if (state.currentSession && state.currentSession.entries[pid]) { (state.currentSession.entries[pid].setLog||[]).forEach(x=>{if(!x.done)x.weight=wv;}); save(); render(); }
         break;
       }
       case 'export-data': exportData(); break;
+      case 'export-csv': exportCSV(); break;
+      case 'favorite': {const id=el.dataset.id;state.favorites=state.favorites.includes(id)?state.favorites.filter(x=>x!==id):[...state.favorites,id];save();render();break;}
+      case 'quick-duration': if(state.currentSession){alert('Beende zuerst die laufende Einheit.');break;}state.sessionMinutes=Number(el.dataset.minutes);save();render();break;
+      case 'discard-session': if(confirm('Laufende Einheit und ihre noch nicht abgeschlossenen Trainingsdaten verwerfen?')){state.currentSession=null;state.swaps={};stopTimer();save();render();}break;
+      case 'toggle-set': toggleSet(el);break;
+      case 'add-set': {const e=state.currentSession?.entries[el.dataset.id];if(e&&e.setLog.length<12){const prev=e.setLog[e.setLog.length-1]||{};e.setLog.push({weight:prev.weight||'',reps:'',rpe:'',done:false});save();render();}break;}
+      case 'remove-set': {const e=state.currentSession?.entries[el.dataset.id];if(e&&e.setLog.length>1&&!e.setLog[e.setLog.length-1].done){e.setLog.pop();save();render();}break;}
       case 'copy-data': copyData(); break;
 
       case 'edit-history': editingHistoryId = el.getAttribute('data-id'); render(); break;
       case 'cancel-edit': editingHistoryId = null; render(); break;
       case 'save-history-date': {
         const hid = el.getAttribute('data-id'); const di = document.getElementById('hd-'+hid);
+        if(di?.value>todayStr()){alert('Ein Training kann nicht in der Zukunft liegen.');break;}
         if (di && di.value) { const en = state.history.find(function (x){ return x.id === hid; }); if (en) en.date = di.value; save(); }
         editingHistoryId = null; render(); break;
       }
@@ -1474,7 +1521,11 @@
   }
 
   function onInput(ev) {
-    const t = ev.target; const f = t.getAttribute('data-field'); if (!f) return;
+    const t = ev.target;
+    if(t.id==='exercise-search'){libraryQuery=t.value;filterLibrary();return;}
+    const f = t.getAttribute('data-field'); if (!f) return;
+    if(f==='session-notes'){if(state.currentSession){state.currentSession.notes=t.value;save();}return;}
+    if(t.dataset.set!==undefined){const e=state.currentSession?.entries[t.dataset.id];const row=e?.setLog[Number(t.dataset.set)];if(row&&!row.done){row[f]=t.value;save();}return;}
     if (f === 'weight' || f === 'reps' || f === 'rpe') {
       const id = t.getAttribute('data-id');
       if (state.currentSession && state.currentSession.entries[id]) { state.currentSession.entries[id][f] = t.value; save(); }
@@ -1485,6 +1536,8 @@
 
   function onChange(ev) {
     const t = ev.target;
+    if(t.id==='exercise-filter'){libraryFilter=t.value;filterLibrary();return;}
+    if(t.id==='chart-exercise'){chartExercise=t.value;render();return;}
     if (t && t.id === 'importFile' && t.files && t.files[0]) { importData(t.files[0]); t.value = ''; }
   }
 
@@ -1551,12 +1604,12 @@
     ensureAudio();
     var t = b.getAttribute('data-t');
     if (t === 'rest') startRest(parseInt(b.getAttribute('data-s'), 10));
-    else if (t === 'add') { ef.left += 15; if (!ef.running) { ef.running = true; ef.mode = 'rest'; ef.phase = 'rest'; startTick(); } updateTimer(); }
+    else if (t === 'add') { ef.left += 15; ef.deadline=(ef.deadline || Date.now())+15000; if (!ef.running) { ef.running = true; ef.mode = 'rest'; ef.phase = 'rest'; startTick(); } updateTimer(); }
     else if (t === 'stop') stopTimer();
     else if (t === 'intv') startInterval(+b.getAttribute('data-w'), +b.getAttribute('data-r'), +b.getAttribute('data-n'));
   }
 
-  function startTick() { clearInterval(ef.iv); updateTimer(); ef.iv = setInterval(tickTimer, 1000); }
+  function startTick() { ef.deadline=Date.now()+ef.left*1000; clearInterval(ef.iv); updateTimer(); ef.iv = setInterval(tickTimer, 1000); }
   function startRest(sec) { ef.mode = 'rest'; ef.phase = 'rest'; ef.left = sec; ef.running = true; beep(660, 0.08); buzz(60); startTick(); }
   function startInterval(work, rest, rounds) {
     ef.mode = 'interval'; ef.work = work; ef.rest = rest; ef.rounds = rounds; ef.round = 1; ef.phase = 'work'; ef.left = work; ef.running = true;
@@ -1566,8 +1619,8 @@
 
   function tickTimer() {
     if (!ef.running) return;
-    ef.left--;
-    if (ef.left <= 0) onPhaseEnd();
+    while(ef.running && Date.now()>=ef.deadline){const deadline=ef.deadline;onPhaseEnd();ef.deadline=deadline+ef.left*1000;}
+    if(ef.running)ef.left=Math.max(0,Math.ceil((ef.deadline-Date.now())/1000));
     updateTimer();
   }
   function onPhaseEnd() {
@@ -1600,8 +1653,7 @@
     var el = timerDOM();
     el.classList.toggle('hidden', !v);
     document.body.classList.toggle('has-timer', v);
-    if (!v) stopTimer();
-    else updateTimer();
+    updateTimer();
   }
 
   /* ----------------------------------------------------------------------
@@ -1676,7 +1728,8 @@
     app.addEventListener('input', onInput);
     app.addEventListener('change', onChange);
     app.addEventListener('keydown', onKey);
-    window.addEventListener('hashchange', render);
+    window.addEventListener('hashchange', ()=>{render();window.scrollTo(0,0);});
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden&&ef.running)tickTimer();});
 
     window.addEventListener('beforeinstallprompt', function (e) {
       e.preventDefault(); efDeferredPrompt = e;

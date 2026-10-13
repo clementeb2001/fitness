@@ -47,6 +47,38 @@
   color-scheme: dark;
 }
 
+/* Training studio: clear set entry and native offline movement player. */
+[hidden] { display: none !important; }
+.movement svg { display: block; width: 100%; height: 245px; margin: 14px auto; background: radial-gradient(ellipse at 50% 55%, var(--steel-soft), transparent 72%); border-radius: 16px; }
+.preview-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.preview-controls select { width: auto; flex: 1; min-width: 130px; font-size: .8rem; }
+.movement .eyebrow { margin: 0; }
+.movement > p { margin: 14px 0 0; line-height: 1.6; }
+.set-table { margin: 16px 0 10px; }
+.set-heading, .set-row { display: grid; grid-template-columns: 28px minmax(55px,1fr) minmax(55px,1fr) minmax(45px,.8fr) 44px; gap: 7px; align-items: center; }
+.set-heading { color: var(--muted); font-size: .75rem; text-align: center; padding: 6px 0; }
+.set-row { padding: 6px 0; border-top: 1px solid var(--line-soft); }
+.set-row > span { text-align: center; color: var(--muted); }
+.set-row input { min-width: 0; padding: 10px 5px; text-align: center; width: 100%; font-variant-numeric: tabular-nums; }
+.set-row.is-done input { background: var(--good-soft); border-color: transparent; }
+.set-check { width: 44px; min-height: 44px; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--card-2); color: var(--muted); cursor: pointer; font-size: 1.1rem; }
+.set-check[aria-pressed="true"] { color: var(--good); background: var(--good-soft); border-color: var(--good); }
+.library-link { display: block; margin-top: 18px; font-size: .85rem; color: var(--orange-ink); }
+.library-item h3 { margin: 7px 0; }
+.library-item h3 a { color: var(--text); text-decoration: none; }
+.library-item .eyebrow { font-size: .64rem; }
+.library-item .iconbtn[aria-pressed="true"] { color: var(--orange-ink); }
+#exercise-filter, #chart-exercise { margin: 7px 0 12px; }
+#exercise-search { margin: 6px 0 16px; }
+.exercise-history { padding: 12px 0; display: grid; gap: 5px; border-bottom: 1px solid var(--line-soft); font-size: .85rem; }
+.exercise-history span { color: var(--muted); line-height: 1.6; }
+:focus-visible { outline: 3px solid var(--steel); outline-offset: 3px; }
+button:disabled { opacity: .4; cursor: default; }
+@media (max-width: 380px) {
+  .set-heading, .set-row { gap: 4px; grid-template-columns: 22px minmax(45px,1fr) minmax(45px,1fr) minmax(40px,.8fr) 44px; }
+  .movement .row-between { align-items: flex-start; flex-direction: column; gap: 7px; }
+}
+
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
     --bg: #eceff4;

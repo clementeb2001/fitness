@@ -17,7 +17,7 @@ Live: **https://clementeb2001.github.io/fitness/**
   der Plan rechnet automatisch nur mit dem Material dieses Ortes.
 - **Tägliches Tagesbefinden** – Beschwerden (Rücken, Schulter, Knie, Handgelenk,
   Ellenbogen, Sprunggelenk, Nacken) pro Tag antippbar. Betroffene Übungen werden über
-  eine kaskadierende Alternativen-Kette automatisch durch sichere Varianten ersetzt –
+  eine kaskadierende Alternativen-Kette automatisch durch andere Varianten ersetzt –
   mit sichtbarem Hinweis „Ersetzt wegen …". Die Prüfung greift auch nach manuellem Tausch.
 - **Voll einstellbar** – Einheiten/Woche (2–6) **und** Dauer pro Einheit (20–75 Min).
   Der Plan skaliert die Übungsanzahl automatisch auf die verfügbare Zeit – ideal, wenn
@@ -30,7 +30,7 @@ Live: **https://clementeb2001.github.io/fitness/**
   Wochen-Adhärenz, Serie, Wochenplan, Sicherheitshinweise.
 - **Verlauf** – alle Einheiten, Bearbeiten/Löschen, abhängigkeitsfreier Canvas-Chart
   (Maximalgewicht über die Zeit) mit textueller Alternative.
-- **Übungsdetails** – Zielmuskulatur, Schritt-für-Schritt, Coach-Tipp, YouTube-Suchlink.
+- **Übungsdetails** – Zielmuskulatur, Schritt-für-Schritt, Coach-Tipp, eigene animierte Offline-Vorschau.
 - **Design** – dunkel/hell/automatisch, tactical „Operations-Console"-Look.
 
 ## Barrierefreiheit
@@ -46,7 +46,7 @@ offline), Icons 192/512. Auf dem iPhone in Safari öffnen → Teilen → „Zum 
 
 ## Dateien
 
-`index.html`, `style.css`, `app.js`, `manifest.json`, `sw.js`, `icon-192.png`,
+`index.html`, `style.css`, `app.js`, `training.js`, `previews.js`, `manifest.json`, `sw.js`, `icon-192.png`,
 `icon-512.png`. Deployment via GitHub Pages (Workflow `.github/workflows/pages.yml`,
 automatischer Deploy bei Push auf `main`).
 
@@ -61,3 +61,15 @@ python3 -m http.server 8000   # dann http://localhost:8000
 Keine Kamera-/KI-Materialerkennung (bräuchte bezahlte Vision-API + Server) – Material
 wird über Orte manuell gepflegt. Kein Backend, keine Datenbank, kein Login. So bleibt die
 App **kostenlos** und offline-fähig.
+
+## Update: Satzprotokoll und Offline-Vorschauen
+
+- 56 interne schematische Bewegungsvorschauen mit Pause, Einzelschritten und Tempoauswahl.
+- Übungsbibliothek mit Suche, Materialfilter und Favoriten.
+- Satzweise Erfassung, RPE, automatische Satzpause, letzte Leistung und begründete Progression.
+- Übungsbezogene Fortschrittskurve, Trainingsnotizen, CSV-Export und JSON-Backup.
+- Schutz laufender Einheiten, geprüfte Datenmigration und Updates nach Bestätigung.
+
+Der [Produktvergleich und App-Check](AUDIT.md) dokumentiert Quellen, behobene Fehler, Tests und Grenzen.
+
+Tests: `node --test tests/training.test.cjs` (Node 20 oder neuer, keine Abhängigkeiten).
