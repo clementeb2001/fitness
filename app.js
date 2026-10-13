@@ -310,6 +310,7 @@
       frequency: 4,          // Einheiten/Woche
       sessionMinutes: 45,    // Ziel-Dauer je Einheit
       theme: 'auto',         // auto | dark | light
+      readiness: { date: '', level: 'normal' }, // Tages-Erholung (Autoregulation)
       swaps: {},
       currentSession: null,
       history: []
@@ -354,6 +355,54 @@
   function activeLocation() { return state.locations.find(function (l) { return l.id === state.activeLocationId; }) || state.locations[0]; }
   function availableEquip() { const loc = activeLocation(); return (loc && loc.equipment) ? loc.equipment : []; }
   function activeComplaints() { return Object.keys(state.complaints).filter(function (k) { return state.complaints[k]; }); }
+
+  /* ----------------------------------------------------------------------
+     Progression & Autoregulation
+     ---------------------------------------------------------------------- */
+  const HEAVY_LIFT = { back_squat:1, deadlift:1, rdl:1, hip_thrust:1, split_squat:1 };
+  function incFor(id) { return HEAVY_LIFT[id] ? 5 : 2.5; }
+  function roundKg(x) { return Math.max(0, Math.round(x / 2.5) * 2.5); }
+  function fmtKg(n) { return (n % 1 === 0) ? String(n) : n.toFixed(1).replace('.', ','); }
+  function parseTopReps(s) { const m = String(s).match(/\d+/g); return m ? Math.max.apply(null, m.map(Number)) : null; }
+
+  // jüngste erfasste Leistung für eine Übung (history ist neueste zuerst)
+  function lastPerfFor(exId) {
+    for (var i = 0; i < state.history.length; i++) {
+      var h = state.history[i]; if (!h.exercises) continue;
+      for (var j = 0; j < h.exercises.length; j++) {
+        if (h.exercises[j].id === exId) return { weight: h.exercises[j].weight, reps: h.exercises[j].doneReps, rpe: h.exercises[j].rpe, date: h.date };
+      }
+    }
+    return null;
+  }
+
+  const READINESS = {
+    frisch:      { label:'Frisch',             icon:'⚡', count:0,  set:0,  load:1.00, tone:'good'  },
+    normal:      { label:'Normal',             icon:'🟢', count:0,  set:0,  load:1.00, tone:'steel' },
+    muede:       { label:'Müde / Nachtschicht',icon:'🌙', count:-1, set:-1, load:0.90, tone:'warn'  },
+    angeschlagen:{ label:'Angeschlagen',       icon:'🤕', count:-2, set:-1, load:0.85, tone:'crit'  }
+  };
+  function todayReadiness() { return (state.readiness && state.readiness.date === todayStr()) ? state.readiness.level : 'normal'; }
+  function programWeek() { return Math.floor(state.history.length / state.frequency) + 1; }
+  function isDeload() { return state.history.length > 0 && programWeek() % 4 === 0; }
+  function effMods() {
+    const r = READINESS[todayReadiness()] || READINESS.normal;
+    const d = isDeload() ? 1 : 0;
+    return { count: r.count - d, set: r.set - d, load: Math.min(r.load, d ? 0.9 : 1), tone: r.tone, label: r.label, icon: r.icon, deload: !!d };
+  }
+
+  // Vorschlag fürs nächste Gewicht aus letzter Leistung + Tagesform
+  function suggestNext(ex) {
+    const lp = lastPerfFor(ex.id); if (!lp) return null;
+    const lastW = parseFloat(lp.weight);
+    if (isNaN(lastW) || lastW <= 0) return { repeat: true, text: (lp.reps ? lp.reps + ' Wdh.' : 'erledigt') };
+    const top = parseTopReps(ex.reps); const lastR = parseInt(lp.reps, 10); const mods = effMods();
+    var next;
+    if (mods.load < 1) next = roundKg(lastW * mods.load);
+    else if (!isNaN(lastR) && top && lastR >= top) next = lastW + incFor(ex.id);
+    else next = lastW;
+    return { last: lastW, lastReps: lp.reps, next: next, up: next > lastW, down: next < lastW };
+  }
 
   /* ----------------------------------------------------------------------
      Adaptions-Logik
@@ -426,7 +475,10 @@
       if (chosen.length < 3 || total + m <= avail) { chosen.push(st.ex[i]); total += m; }
       else break;
     }
-    return chosen;
+    // Autoregulation / Deload: Übungszahl reduzieren (min. 3)
+    const mods = effMods();
+    const target = Math.max(3, chosen.length + mods.count);
+    return chosen.slice(0, Math.min(chosen.length, target));
   }
 
   function conditioningPlan() {
@@ -483,7 +535,7 @@
   function newSession(type) {
     const planned = scaledExercises(type);
     const entries = {};
-    planned.forEach(function (pid) { entries[pid] = { done:false, weight:'', reps:'' }; });
+    planned.forEach(function (pid) { entries[pid] = { done:false, weight:'', reps:'', rpe:'' }; });
     const s = { type:type, startedAt:new Date().toISOString(), warmup:false, cooldown:false, planned:planned, entries:entries };
     if (SESSIONS[type].conditioning) s.condDone = false;
     return s;
@@ -496,7 +548,7 @@
     if (!st.conditioning) {
       s.planned.forEach(function (pid) {
         const r = resolveExercise(pid); const e = s.entries[pid] || {};
-        exercises.push({ id:r.exercise.id, name:r.exercise.name, sets:r.exercise.sets, reps:r.exercise.reps, weight:e.weight||'', doneReps:e.reps||'' });
+        exercises.push({ id:r.exercise.id, name:r.exercise.name, sets:r.exercise.sets, reps:r.exercise.reps, weight:e.weight||'', doneReps:e.reps||'', rpe:e.rpe||'' });
       });
     }
     state.history.unshift({
@@ -516,6 +568,47 @@
     const root = document.documentElement;
     if (state.theme === 'auto') root.removeAttribute('data-theme');
     else root.setAttribute('data-theme', state.theme);
+  }
+
+  /* ----------------------------------------------------------------------
+     Backup: Export / Import
+     ---------------------------------------------------------------------- */
+  function exportData() {
+    try {
+      const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'einsatzfit-backup-' + todayStr() + '.json';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    } catch (e) { alert('Export nicht möglich.'); }
+  }
+  function copyData() {
+    const text = JSON.stringify(state);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { alert('Backup in die Zwischenablage kopiert.'); },
+        function () { alert('Kopieren nicht möglich.'); });
+    } else { alert('Zwischenablage nicht verfügbar – nutze stattdessen die Backup-Datei.'); }
+  }
+  function importData(file) {
+    const fr = new FileReader();
+    fr.onload = function () {
+      try {
+        const obj = JSON.parse(fr.result);
+        if (!obj || typeof obj !== 'object' || !Array.isArray(obj.history) || !Array.isArray(obj.locations)) {
+          alert('Ungültige Backup-Datei.'); return;
+        }
+        if (!confirm('Backup laden? Deine aktuellen Daten werden vollständig ersetzt.')) return;
+        const d = defaultState();
+        state = Object.assign(d, obj);
+        state.complaints = Object.assign(d.complaints, obj.complaints || {});
+        if (!state.locations.length) { state.locations = d.locations; state.activeLocationId = d.locations[0].id; }
+        if (!state.locations.some(function (l) { return l.id === state.activeLocationId; })) state.activeLocationId = state.locations[0].id;
+        save(); applyTheme(); editLocationId = null; editingHistoryId = null;
+        location.hash = '#/'; render(); alert('Backup geladen.');
+      } catch (e) { alert('Datei konnte nicht gelesen werden.'); }
+    };
+    fr.readAsText(file);
   }
 
   /* ----------------------------------------------------------------------
@@ -554,6 +647,7 @@
     app.innerHTML = html + (nav !== null ? renderNav(nav) : '');
     window.scrollTo(0, 0);
     if (r.route === 'verlauf') drawChart();
+    showTimer(r.route === 'session');
   }
 
   function renderNav(active) {
@@ -631,6 +725,27 @@
         '<span class="ico" aria-hidden="true">'+COMPLAINTS[k].icon+'</span>' +
         '<span class="label">'+COMPLAINTS[k].label+'</span><span class="box" aria-hidden="true"></span></div>';
     }).join('');
+  }
+
+  function readinessCardHTML() {
+    const lvl = todayReadiness();
+    const mods = effMods();
+    const chips = Object.keys(READINESS).map(function (k) { const r = READINESS[k];
+      return '<button class="chip chip--steel" aria-pressed="'+(lvl===k?'true':'false')+'" data-action="set-readiness" data-level="'+k+'">'+r.icon+' '+esc(r.label)+'</button>';
+    }).join('');
+    var note = '';
+    if (mods.count < 0 || mods.set < 0 || mods.load < 1) {
+      var parts = [];
+      if (mods.count < 0) parts.push(Math.abs(mods.count)+' Übung(en) weniger');
+      if (mods.set < 0) parts.push('reduzierte Sätze');
+      if (mods.load < 1) parts.push('Last-Vorschläge ~'+Math.round((1-mods.load)*100)+'% niedriger');
+      note = '<div class="notice notice--info" style="margin-top:10px">Heute angepasst: '+parts.join(', ')+'.</div>';
+    }
+    const cur = READINESS[lvl] || READINESS.normal;
+    return '<div class="card"><div class="row-between" style="margin-bottom:10px"><h3 style="margin:0">Erholung heute</h3>' +
+      '<span class="pill pill--'+cur.tone+'">'+cur.icon+' '+esc(cur.label)+'</span></div>' +
+      '<p class="small muted" style="margin:0 0 10px">Nach Nachtschicht oder bei Belastung anpassen – der Plan skaliert Umfang und Last automatisch.</p>' +
+      '<div class="chips">'+chips+'</div>'+note+'</div>';
   }
 
   function locationsEditorHTML() {
@@ -764,6 +879,9 @@
       '<h1>'+(state.name ? 'Servus '+esc(state.name) : 'Dein Training')+'</h1></div>' +
       '<button class="iconbtn" data-action="cycle-theme" aria-label="Design wechseln">'+(state.theme==='light'?'☀️':state.theme==='dark'?'🌙':'◐')+'</button></div>' +
 
+      (isDeload() ? '<div class="card card--steel"><strong>🔄 Deload-Woche (Woche '+programWeek()+')</strong>' +
+        '<p class="small" style="margin:6px 0 0">Volumen &amp; Last sind bewusst reduziert – Technik und Erholung im Fokus. Nächste Woche wieder voll angreifen.</p></div>' : '') +
+
       '<div class="card card--tight"><div class="row-between" style="margin-bottom:10px"><span class="eyebrow" style="margin:0">Wo bist du?</span>'+
         '<span class="small muted">Material passt sich an</span></div>'+locSwitch+'</div>' +
 
@@ -773,6 +891,8 @@
       '<div class="card"><div class="row-between" style="margin-bottom:10px"><h3 style="margin:0">Tagesbefinden</h3>'+readinessPill+'</div>' +
       '<p class="small muted" style="margin:0 0 10px">Tippe an, was heute zwickt – der Plan baut betroffene Übungen sicher um.</p>' +
       compChips + complaintNote + '</div>' +
+
+      readinessCardHTML() +
 
       '<div class="card"><div class="row-between" style="margin-bottom:8px"><h3 style="margin:0">Diese Woche</h3>' +
       '<span class="small muted tnum">'+thisWeek+' / '+goal+'</span></div>'+weekrow+'</div>' +
@@ -830,8 +950,15 @@
 
     const cool = stepCard('Abwärmen', '3–5 Min', COOLDOWN_TEXT, s.cooldown, 'toggle-cooldown');
 
-    const note = state.complaintsText.trim()
-      ? '<div class="notice notice--warn" style="margin:0 0 12px">🩹 Dein Hinweis: '+esc(state.complaintsText.trim())+' – achte besonders darauf.</div>' : '';
+    const mods = effMods();
+    var note = '';
+    if (mods.set < 0 || mods.count < 0 || mods.deload) {
+      note += '<div class="notice notice--info" style="margin:0 0 12px">'+(mods.deload?'🔄 Deload · ':'')+(READINESS[todayReadiness()]?READINESS[todayReadiness()].icon+' '+esc(READINESS[todayReadiness()].label):'')+
+        ' – Umfang/Last heute reduziert. Technik sauber, kein Maximalkraft-Versuch.</div>';
+    }
+    if (state.complaintsText.trim()) {
+      note += '<div class="notice notice--warn" style="margin:0 0 12px">🩹 Dein Hinweis: '+esc(state.complaintsText.trim())+' – achte besonders darauf.</div>';
+    }
 
     const finish = '<button class="btn btn--lg btn--block" data-action="finish">Einheit abschließen ✓</button>' +
       '<p class="small muted center" style="margin-top:8px">Alle Eingaben werden automatisch gespeichert.</p>';
@@ -851,22 +978,44 @@
 
   function exerciseCard(res, entry, num, withIO) {
     const ex = res.exercise;
-    entry = entry || { done:false, weight:'', reps:'' };
+    entry = entry || { done:false, weight:'', reps:'', rpe:'' };
     var notice = '';
     if (res.warning) notice = '<div class="notice notice--warn">⚠️ '+esc(res.warning)+'</div>';
     else if (res.reason) notice = '<div class="notice notice--swap">↺ '+esc(res.reason)+'</div>';
+
+    // Autoregulation: effektive Satzzahl
+    const mods = effMods();
+    const effSets = Math.max(2, ex.sets + mods.set);
+    const setsNote = (mods.set < 0) ? ' <span class="faint small">(angepasst)</span>' : '';
+
+    // Progression: "letztes Mal" + Vorschlag
+    var progLine = '';
+    if (withIO) {
+      const sg = suggestNext(ex);
+      if (sg) {
+        if (sg.repeat) {
+          progLine = '<div class="last-line">Letztes Mal: '+esc(sg.text)+'</div>';
+        } else {
+          const arrow = sg.up ? '↑' : (sg.down ? '↓' : '→');
+          progLine = '<div class="last-line">Letztes Mal: <b>'+fmtKg(sg.last)+' kg</b>'+(sg.lastReps?' × '+esc(sg.lastReps):'') +
+            ' <button class="sug" data-action="apply-suggest" data-id="'+res.plannedId+'" data-w="'+sg.next+'">Vorschlag '+fmtKg(sg.next)+' kg '+arrow+'</button></div>';
+        }
+      }
+    }
 
     const io = withIO ? '<div class="io-fields">' +
       '<div class="field"><label for="w-'+res.plannedId+'">Gewicht kg</label>' +
       '<input id="w-'+res.plannedId+'" type="number" inputmode="decimal" min="0" step="0.5" value="'+esc(entry.weight)+'" data-field="weight" data-id="'+res.plannedId+'" placeholder="–"></div>' +
       '<div class="field"><label for="r-'+res.plannedId+'">Wdh.</label>' +
-      '<input id="r-'+res.plannedId+'" type="number" inputmode="numeric" min="0" step="1" value="'+esc(entry.reps)+'" data-field="reps" data-id="'+res.plannedId+'" placeholder="–"></div></div>' : '';
+      '<input id="r-'+res.plannedId+'" type="number" inputmode="numeric" min="0" step="1" value="'+esc(entry.reps)+'" data-field="reps" data-id="'+res.plannedId+'" placeholder="–"></div>' +
+      '<div class="field" style="flex:.7"><label for="rpe-'+res.plannedId+'">RPE</label>' +
+      '<input id="rpe-'+res.plannedId+'" type="number" inputmode="decimal" min="0" max="10" step="0.5" value="'+esc(entry.rpe)+'" data-field="rpe" data-id="'+res.plannedId+'" placeholder="–"></div></div>' : '';
 
     return '<div class="exercise '+(entry.done?'done':'')+'">' +
       '<div class="head"><div class="grow"><div class="num">'+esc(num)+'</div><h3>'+esc(ex.name)+'</h3>' +
-      '<div class="scheme">'+ex.sets+' × '+esc(ex.reps)+'</div></div>' +
+      '<div class="scheme">'+effSets+' × '+esc(ex.reps)+setsNote+'</div></div>' +
       checkEl(entry.done, ex.name+' erledigt', 'toggle-ex', res.plannedId)+'</div>' +
-      notice + io +
+      notice + progLine + io +
       '<div class="ex-actions">' +
       '<a class="btn btn--soft btn--sm" href="#/uebung/'+ex.id+'">Übung ansehen</a>' +
       '<button class="btn btn--muted btn--sm" data-action="swap" data-id="'+res.plannedId+'">Tauschen</button></div></div>';
@@ -1018,6 +1167,16 @@
         return '<button class="chip" aria-pressed="'+(state.theme===t?'true':'false')+'" data-action="set-theme" data-theme="'+t+'">'+label+'</button>';
       }).join('') + '</div></div>' +
 
+      '<div class="card"><h3>Datensicherung</h3>' +
+      '<p class="small muted" style="margin-bottom:10px">Deine Daten liegen nur auf diesem Gerät. Sichere sie regelmäßig – ' +
+      'z. B. vor einem Handywechsel oder App-Update.</p>' +
+      '<div class="btn-row">' +
+      '<button class="btn btn--soft" data-action="export-data">⤓ Backup-Datei</button>' +
+      '<button class="btn btn--muted" data-action="copy-data">Kopieren</button></div>' +
+      '<label class="btn btn--ghost btn--block" for="importFile" style="margin-top:10px">⤒ Backup laden (Import)</label>' +
+      '<input type="file" id="importFile" accept="application/json,.json" class="hidden">' +
+      '<p class="small faint" style="margin:8px 0 0">Import ersetzt alle aktuellen Daten.</p></div>' +
+
       '<div class="card"><h3>Profil</h3>' +
       '<div class="field"><label for="nm">Name (optional)</label>' +
       '<input type="text" id="nm" value="'+esc(state.name)+'" data-field="name" placeholder="Dein Name"></div>' +
@@ -1110,6 +1269,15 @@
       case 'swap': swapExercise(el.getAttribute('data-id')); render(); break;
       case 'finish': finishSession(); break;
 
+      case 'set-readiness': state.readiness = { date: todayStr(), level: el.getAttribute('data-level') }; save(); render(); break;
+      case 'apply-suggest': {
+        const pid = el.getAttribute('data-id'); const wv = el.getAttribute('data-w');
+        if (state.currentSession && state.currentSession.entries[pid]) { state.currentSession.entries[pid].weight = wv; save(); render(); }
+        break;
+      }
+      case 'export-data': exportData(); break;
+      case 'copy-data': copyData(); break;
+
       case 'edit-history': editingHistoryId = el.getAttribute('data-id'); render(); break;
       case 'cancel-edit': editingHistoryId = null; render(); break;
       case 'save-history-date': {
@@ -1131,7 +1299,7 @@
 
   function onInput(ev) {
     const t = ev.target; const f = t.getAttribute('data-field'); if (!f) return;
-    if (f === 'weight' || f === 'reps') {
+    if (f === 'weight' || f === 'reps' || f === 'rpe') {
       const id = t.getAttribute('data-id');
       if (state.currentSession && state.currentSession.entries[id]) { state.currentSession.entries[id][f] = t.value; save(); }
     } else if (f === 'complaintsText') { state.complaintsText = t.value; save(); }
@@ -1139,10 +1307,125 @@
     else if (f === 'loc-name') { const loc = state.locations.find(function (l){ return l.id === t.getAttribute('data-id'); }); if (loc) { loc.name = t.value; save(); } }
   }
 
+  function onChange(ev) {
+    const t = ev.target;
+    if (t && t.id === 'importFile' && t.files && t.files[0]) { importData(t.files[0]); t.value = ''; }
+  }
+
   function onKey(ev) {
     if (ev.key !== 'Enter' && ev.key !== ' ' && ev.key !== 'Spacebar') return;
     const el = ev.target.closest('[role="checkbox"][data-action]');
     if (el) { ev.preventDefault(); el.click(); }
+  }
+
+  /* ----------------------------------------------------------------------
+     Timer (Satzpause + Intervalle) — lebt außerhalb von #app,
+     damit er Re-Renders der App übersteht.
+     ---------------------------------------------------------------------- */
+  var ef = { iv:null, left:0, running:false, mode:'rest', phase:'idle', work:0, rest:0, rounds:0, round:0, actx:null };
+
+  function timerDOM() {
+    var el = document.getElementById('ef-timer');
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = 'ef-timer'; el.className = 'ef-timer hidden'; el.setAttribute('data-phase', 'idle');
+    el.innerHTML =
+      '<div class="ef-top"><div class="ef-read"><span id="ef-mode" class="ef-mode">Timer</span>' +
+      '<span id="ef-time" class="ef-time">0:00</span></div>' +
+      '<div class="ef-presets">' +
+      '<button class="ef-btn" data-t="rest" data-s="60">1:00</button>' +
+      '<button class="ef-btn" data-t="rest" data-s="90">1:30</button>' +
+      '<button class="ef-btn" data-t="rest" data-s="120">2:00</button>' +
+      '<button class="ef-btn" data-t="add">+15</button>' +
+      '<button class="ef-btn ef-stop" data-t="stop" aria-label="Timer stoppen">■</button>' +
+      '</div></div>' +
+      '<div class="ef-intv"><span class="ef-lbl">Intervall</span>' +
+      '<button class="ef-btn" data-t="intv" data-w="20" data-r="10" data-n="8">20/10 ×8</button>' +
+      '<button class="ef-btn" data-t="intv" data-w="40" data-r="20" data-n="8">40/20 ×8</button>' +
+      '<button class="ef-btn" data-t="intv" data-w="60" data-r="0" data-n="10">EMOM ×10</button>' +
+      '</div>';
+    document.body.appendChild(el);
+    el.addEventListener('click', onTimerClick);
+    return el;
+  }
+
+  function ensureAudio() {
+    try {
+      if (!ef.actx) ef.actx = new (window.AudioContext || window.webkitAudioContext)();
+      if (ef.actx && ef.actx.state === 'suspended') ef.actx.resume();
+    } catch (e) {}
+  }
+  function beep(freq, dur) {
+    if (!ef.actx) return;
+    try {
+      var o = ef.actx.createOscillator(), g = ef.actx.createGain();
+      o.type = 'sine'; o.frequency.value = freq || 880; o.connect(g); g.connect(ef.actx.destination);
+      var t = ef.actx.currentTime;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.35, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + (dur || 0.15));
+      o.start(t); o.stop(t + (dur || 0.15));
+    } catch (e) {}
+  }
+  function buzz(ms) { if (navigator.vibrate) { try { navigator.vibrate(ms || 120); } catch (e) {} } }
+  function doneSignal() { beep(1047, 0.22); setTimeout(function () { beep(1319, 0.28); }, 180); buzz(300); }
+
+  function onTimerClick(ev) {
+    var b = ev.target.closest('[data-t]'); if (!b) return;
+    ensureAudio();
+    var t = b.getAttribute('data-t');
+    if (t === 'rest') startRest(parseInt(b.getAttribute('data-s'), 10));
+    else if (t === 'add') { ef.left += 15; if (!ef.running) { ef.running = true; ef.mode = 'rest'; ef.phase = 'rest'; startTick(); } updateTimer(); }
+    else if (t === 'stop') stopTimer();
+    else if (t === 'intv') startInterval(+b.getAttribute('data-w'), +b.getAttribute('data-r'), +b.getAttribute('data-n'));
+  }
+
+  function startTick() { clearInterval(ef.iv); updateTimer(); ef.iv = setInterval(tickTimer, 1000); }
+  function startRest(sec) { ef.mode = 'rest'; ef.phase = 'rest'; ef.left = sec; ef.running = true; beep(660, 0.08); buzz(60); startTick(); }
+  function startInterval(work, rest, rounds) {
+    ef.mode = 'interval'; ef.work = work; ef.rest = rest; ef.rounds = rounds; ef.round = 1; ef.phase = 'work'; ef.left = work; ef.running = true;
+    beep(880, 0.18); buzz(150); startTick();
+  }
+  function stopTimer() { ef.running = false; clearInterval(ef.iv); ef.iv = null; ef.left = 0; ef.mode = 'rest'; ef.phase = 'idle'; updateTimer(); }
+
+  function tickTimer() {
+    if (!ef.running) return;
+    ef.left--;
+    if (ef.left <= 0) onPhaseEnd();
+    updateTimer();
+  }
+  function onPhaseEnd() {
+    if (ef.mode === 'rest') { doneSignal(); ef.running = false; clearInterval(ef.iv); ef.left = 0; ef.phase = 'done'; return; }
+    // Intervall
+    if (ef.phase === 'work' && ef.rest > 0) { ef.phase = 'rest'; ef.left = ef.rest; beep(440, 0.15); buzz(120); return; }
+    if (ef.round >= ef.rounds) { doneSignal(); ef.running = false; clearInterval(ef.iv); ef.left = 0; ef.phase = 'done'; return; }
+    ef.round++; ef.phase = 'work'; ef.left = ef.work; beep(880, 0.18); buzz(150);
+  }
+
+  function fmtTime(s) { s = Math.max(0, s | 0); return Math.floor(s / 60) + ':' + pad(s % 60); }
+  function updateTimer() {
+    var el = document.getElementById('ef-timer'); if (!el) return;
+    var timeEl = document.getElementById('ef-time'), modeEl = document.getElementById('ef-mode');
+    if (timeEl) timeEl.textContent = fmtTime(ef.left);
+    var label = 'Timer', phase = 'idle';
+    if (ef.mode === 'rest') {
+      if (ef.phase === 'done') { label = 'Pause fertig'; phase = 'done'; }
+      else if (ef.running) { label = 'Satzpause'; phase = 'rest'; }
+    } else if (ef.mode === 'interval') {
+      if (ef.phase === 'work') { label = 'Arbeit ' + ef.round + '/' + ef.rounds; phase = 'work'; }
+      else if (ef.phase === 'rest') { label = 'Pause ' + ef.round + '/' + ef.rounds; phase = 'rest'; }
+      else if (ef.phase === 'done') { label = 'Fertig 💪'; phase = 'done'; }
+    }
+    if (modeEl) modeEl.textContent = label;
+    el.setAttribute('data-phase', phase);
+  }
+
+  function showTimer(v) {
+    var el = timerDOM();
+    el.classList.toggle('hidden', !v);
+    document.body.classList.toggle('has-timer', v);
+    if (!v) stopTimer();
+    else updateTimer();
   }
 
   /* ----------------------------------------------------------------------
@@ -1154,6 +1437,7 @@
     const app = document.getElementById('app');
     app.addEventListener('click', onClick);
     app.addEventListener('input', onInput);
+    app.addEventListener('change', onChange);
     app.addEventListener('keydown', onKey);
     window.addEventListener('hashchange', render);
     render();

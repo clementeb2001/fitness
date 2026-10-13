@@ -434,6 +434,50 @@ ol.steps li { margin-bottom: 8px; }
 .bottom-nav a.active { color: var(--orange); }
 .bottom-nav a.active .ico { filter: drop-shadow(0 0 10px var(--accent-soft)); }
 
+/* ---------------- Progression ("letztes Mal" + Vorschlag) --------------- */
+.last-line {
+  margin-top: 10px; font-size: .85rem; color: var(--muted);
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.last-line b { color: var(--text); font-family: var(--mono); }
+.sug {
+  border: 1px solid var(--orange); background: var(--accent-soft); color: var(--orange);
+  border-radius: 999px; padding: 5px 11px; font-size: .8rem; font-weight: 700; cursor: pointer;
+  font-family: var(--mono); -webkit-tap-highlight-color: transparent;
+}
+.sug:active { transform: scale(.97); }
+
+/* ---------------- Timer-Leiste (fix, außerhalb von #app) ---------------- */
+body.has-timer .view--full { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 184px); }
+.ef-timer {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  background: color-mix(in srgb, var(--bg-2) 92%, transparent);
+  backdrop-filter: saturate(1.5) blur(14px); -webkit-backdrop-filter: saturate(1.5) blur(14px);
+  border-top: 1px solid var(--line); box-shadow: 0 -8px 24px rgba(0,0,0,.28);
+}
+.ef-timer.hidden { display: none !important; }
+.ef-timer .ef-top { max-width: 580px; margin: 0 auto; display: flex; align-items: center; gap: 12px; }
+.ef-timer .ef-intv { max-width: 580px; margin: 10px auto 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ef-read { display: flex; flex-direction: column; min-width: 92px; }
+.ef-mode { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; }
+.ef-time { font-family: var(--mono); font-size: 1.9rem; font-weight: 700; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.ef-presets { display: flex; gap: 6px; flex: 1; justify-content: flex-end; flex-wrap: wrap; }
+.ef-lbl { font-size: .72rem; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.ef-btn {
+  border: 1px solid var(--line); background: var(--elev); color: var(--text);
+  border-radius: 11px; padding: 9px 11px; font-size: .86rem; font-weight: 650; cursor: pointer;
+  font-family: var(--mono); min-height: 40px; -webkit-tap-highlight-color: transparent;
+}
+.ef-btn:active { transform: scale(.96); }
+.ef-btn.ef-stop { color: var(--crit); border-color: var(--crit); }
+.ef-timer[data-phase="work"] .ef-time { color: var(--orange); }
+.ef-timer[data-phase="rest"] .ef-time { color: var(--steel); }
+.ef-timer[data-phase="done"] .ef-time { color: var(--good); }
+.ef-timer[data-phase="work"] { border-top-color: var(--orange); }
+.ef-timer[data-phase="rest"] { border-top-color: var(--steel); }
+.ef-timer[data-phase="done"] { border-top-color: var(--good); }
+
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }

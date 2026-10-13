@@ -1,6 +1,6 @@
 /* EinsatzFit – Service Worker. Cache-first für Offline-Nutzung.
    Bei Datei-Änderungen CACHE-Version erhöhen → alte Caches werden ersetzt. */
-const CACHE = 'einsatzfit-v2';
+const CACHE = 'einsatzfit-v3';
 
 const ASSETS = [
   './',
