@@ -515,7 +515,13 @@ body.has-timer .view--full { padding-bottom: calc(env(safe-area-inset-bottom, 0p
 /* ---------------- Muskel-Diagramm --------------------------------------- */
 .bodymap { display: flex; gap: 12px; justify-content: center; }
 .bodyfig { margin: 0; flex: 1; max-width: 160px; text-align: center; }
-.bodyfig svg { height: 180px; display: block; margin: 0 auto; }
+.bodyfig svg { height: 150px; display: block; margin: 0 auto; }
+
+/* Segmentierte Umschaltung (z. B. Bewegung / Muskeln) */
+.seg { display: flex; gap: 4px; background: var(--bg-2); border: 1px solid var(--line-soft); border-radius: 13px; padding: 4px; margin-bottom: 14px; }
+.seg-btn { flex: 1; border: none; background: transparent; color: var(--muted); font-weight: 650; font-size: .92rem; font-family: inherit; padding: 10px; border-radius: 10px; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: background .15s ease, color .15s ease; }
+.seg-btn.active { background: var(--card); color: var(--text); box-shadow: var(--shadow); }
+.seg-btn:focus-visible { outline: 3px solid var(--accent-soft); }
 .bodyfig figcaption { font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-top: 4px; font-weight: 700; }
 
 /* ---------------- Trainings-Zusammenfassung ----------------------------- */

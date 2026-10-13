@@ -748,7 +748,7 @@
       item('#/verlauf','verlauf','📈','Verlauf') +
       item('#/bibliothek','bibliothek','▤','Übungen') +
       item('#/orte','orte','📍','Orte') +
-      item('#/einstellungen','einstellungen','⚙️','Einstellung') +
+      item('#/einstellungen','einstellungen','⚙️','Mehr') +
       '</div></nav>';
   }
 
@@ -1335,16 +1335,22 @@
       ? '<div class="row-between" style="margin-top:4px"><span class="pill pill--orange">🏆 Bestwert '+fmtKg(pr.maxW)+' kg</span>' +
         (pr.best1>0?'<span class="small muted tnum">≈ 1RM '+round1(pr.best1)+' kg</span>':'')+'</div>'
       : '';
+    const tab = (detailTab === 'mus') ? 'mus' : 'move';
+    const visual = (tab === 'move')
+      ? ExercisePreview.html(ex)
+      : '<div class="row-between" style="margin-bottom:6px"><span class="eyebrow" style="margin:0">Beanspruchte Muskeln</span>' +
+        '<span style="font-size:1.5rem">'+(ex.emoji||'💪')+'</span></div>' + bodyDiagram(id) +
+        '<div class="tags" style="margin-top:12px">'+musTags+'</div>' +
+        '<p class="small muted" style="margin:10px 0 0">Zielmuskulatur: '+esc(ex.target)+'</p>';
     return '<div class="view">' +
       '<div class="topbar"><a class="iconbtn" href="'+(state.currentSession?'#/session/'+state.currentSession.type:'#/bibliothek')+'" aria-label="Zurück zum Training oder zur Bibliothek">‹</a>' +
       '<h1 style="font-size:1.2rem">'+esc(ex.name)+'</h1></div>' +
-      '<div class="card">'+ExercisePreview.html(ex)+'</div>' +
-      '<div class="card"><div class="row-between" style="margin-bottom:4px"><h3 style="margin:0">Beanspruchte Muskeln</h3>' +
-      '<span style="font-size:1.6rem">'+(ex.emoji||'💪')+'</span></div>' +
-      bodyDiagram(id) +
-      '<div class="tags" style="margin-top:10px">'+musTags+'</div></div>' +
-      '<div class="card stack"><div><h3>Zielmuskulatur</h3><p class="muted" style="margin:0">'+esc(ex.target)+'</p></div>' +
-      '<div><h3 style="margin-bottom:6px">Schema</h3><p class="tnum" style="margin:0">'+ex.sets+' Sätze × '+esc(ex.reps)+'</p>'+prLine+'</div>' +
+      '<div class="card"><div class="seg" role="tablist">' +
+      '<button class="seg-btn '+(tab==='move'?'active':'')+'" role="tab" aria-selected="'+(tab==='move')+'" data-action="detail-tab" data-tab="move">🎬 Bewegung</button>' +
+      '<button class="seg-btn '+(tab==='mus'?'active':'')+'" role="tab" aria-selected="'+(tab==='mus')+'" data-action="detail-tab" data-tab="mus">💪 Muskeln</button>' +
+      '</div>'+visual+'</div>' +
+      '<div class="card stack"><div><h3 style="margin-bottom:6px">Schema</h3>' +
+      '<p class="tnum" style="margin:0">'+ex.sets+' Sätze × '+esc(ex.reps)+'</p>'+prLine+'</div>' +
       '<div class="tags">'+eqTags+loadTags+'</div></div>' +
       '<div class="card"><h3>So geht’s</h3>'+steps+coach+'</div>' +
       exerciseHistoryHTML(id) +
@@ -1354,7 +1360,7 @@
   /* ----------------------------------------------------------------------
      Events
      ---------------------------------------------------------------------- */
-  var libraryQuery='', libraryFilter='all', chartExercise='';
+  var libraryQuery='', libraryFilter='all', chartExercise='', detailTab='move';
   function quickAdaptHTML() {
     return '<div class="card"><div class="row-between"><h3>Heute weniger Zeit?</h3><span class="pill pill--steel">Dein Rhythmus</span></div><p class="small muted">Dauer vor dem Start wählen. Die nächste Einheit passt sich an.</p><div class="chips">'+[20,30,45,60,75].map(n=>'<button class="chip" aria-pressed="'+(state.sessionMinutes===n)+'" data-action="quick-duration" data-minutes="'+n+'">'+n+' Min</button>').join('')+'</div><a class="library-link" href="#/bibliothek">Alle Übungen & Bewegungsvorschauen →</a></div>';
   }
@@ -1420,6 +1426,8 @@
       case 'onb-next': onboardStep = Math.min(5, onboardStep+1); render(); break;
       case 'onb-back': onboardStep = Math.max(1, onboardStep-1); render(); break;
       case 'onb-finish': state.onboarded = true; save(); onboardStep = 1; location.hash = '#/'; render(); break;
+
+      case 'detail-tab': detailTab = el.getAttribute('data-tab'); render(); break;
 
       case 'cycle-theme': {
         state.theme = state.theme==='auto'?'dark':state.theme==='dark'?'light':'auto';
