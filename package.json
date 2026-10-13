@@ -2,12 +2,14 @@
   "name": "einsatzfit",
   "version": "1.0.0",
   "private": true,
-  "description": "EinsatzFit – native iOS-App (Capacitor). Web-Quelle sind die Dateien im Repo-Root; der Build kopiert sie nach www/.",
+  "description": "EinsatzFit \u2013 native iOS-App (Capacitor). Web-Quelle sind die Dateien im Repo-Root; der Build kopiert sie nach www/.",
   "scripts": {
     "web:build": "node scripts/copy-web.mjs",
     "ios:add": "npm run web:build && cap add ios",
     "ios:sync": "npm run web:build && cap sync ios",
-    "ios:open": "cap open ios"
+    "ios:open": "cap open ios",
+    "test": "node --test tests/*.test.cjs",
+    "web:deploy": "node scripts/web-build.mjs"
   },
   "dependencies": {
     "@capacitor/app": "^6.0.2",
@@ -19,6 +21,10 @@
     "@capacitor/status-bar": "^6.0.2"
   },
   "devDependencies": {
-    "@capacitor/cli": "^6.2.0"
+    "@capacitor/cli": "^6.2.0",
+    "esbuild": "^0.25.0"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

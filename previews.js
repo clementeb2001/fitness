@@ -117,6 +117,7 @@
   let raf;
   function mount() {
     cancelAnimationFrame(raf);
+    raf=null;
     const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
     const players=[...document.querySelectorAll('[data-preview]')].map(el=>({el,def:map[el.dataset.preview],t:0,playing:false,speed:1}));
     function draw(p) {
@@ -131,14 +132,18 @@
         if(b.dataset.previewAction==='step'){p.playing=false;p.t=(p.t+1/Math.max(1,p.def.frames.length-1))%1;draw(p);}
         else p.playing=!p.playing;
         p.el.querySelector('[data-preview-action="play"]').textContent=p.playing?'Ⅱ Pause':'▶ Abspielen';
+        if(p.playing)schedule();
+      });
+      p.el.closest('.session-preview')?.addEventListener('toggle',e=>{
+        if(!e.target.open){p.playing=false;p.el.querySelector('[data-preview-action="play"]').textContent='▶ Abspielen';}
       });
       p.el.querySelector('[data-preview-speed]').onchange=e=>p.speed=Number(e.target.value);
       if(reduced)p.el.querySelector('[data-preview-action="play"]').setAttribute('aria-label','Animation bewusst abspielen (reduzierte Bewegung aktiv)');
     });
     if(!players.length)return;
     let last=performance.now();
-    function tick(now){const dt=Math.min(now-last,100);last=now;players.forEach(p=>{if(p.playing&&!document.hidden){p.t+=dt/1000/p.def.seconds*p.speed;draw(p);}});raf=requestAnimationFrame(tick);}
-    raf=requestAnimationFrame(tick);
+    function schedule(){if(raf===null){last=performance.now();raf=requestAnimationFrame(tick);}}
+    function tick(now){raf=null;const dt=Math.min(now-last,100);last=now;players.forEach(p=>{if(p.playing&&!document.hidden&&p.el.isConnected){p.t+=dt/1000/p.def.seconds*p.speed;draw(p);}});if(players.some(p=>p.playing&&p.el.isConnected))raf=requestAnimationFrame(tick);}
   }
   window.ExercisePreview={html,mount,ids:Object.keys(map)};
 })();

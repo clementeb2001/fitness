@@ -1,6 +1,6 @@
 /* EinsatzFit – Service Worker. Cache-first für Offline-Nutzung.
    Bei Datei-Änderungen CACHE-Version erhöhen → alte Caches werden ersetzt. */
-const CACHE = 'einsatzfit-v5';
+const CACHE = 'einsatzfit-v6';
 
 const ASSETS = [
   './',
@@ -30,14 +30,14 @@ self.addEventListener('activate', (event) => {
       Promise.all(keys.filter((k) => k.startsWith('einsatzfit-') && k !== CACHE).map((k) => caches.delete(k)))
     )
   );
-  self.clients.claim();
+  event.waitUntil(self.clients.claim());
 });
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
   event.respondWith(
-    caches.match(req).then((cached) => {
+    caches.open(CACHE).then(cache => cache.match(req)).then((cached) => {
       if (cached) return cached;
       return fetch(req)
         .then((res) => {
@@ -48,7 +48,7 @@ self.addEventListener('fetch', (event) => {
           return res;
         })
         .catch(() => {
-          if (req.mode === 'navigate') return caches.match('./index.html');
+          if (req.mode === 'navigate') return caches.open(CACHE).then(cache => cache.match('./index.html'));
           return new Response('', { status: 504, statusText: 'Offline' });
         });
     })

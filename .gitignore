@@ -7,3 +7,7 @@ _*.mjs
 # Capacitor
 www/
 ios/
+
+_site/
+_site.staging/
+www.staging/

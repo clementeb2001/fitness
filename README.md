@@ -73,3 +73,9 @@ App **kostenlos** und offline-fähig.
 Der [Produktvergleich und App-Check](AUDIT.md) dokumentiert Quellen, behobene Fehler, Tests und Grenzen.
 
 Tests: `node --test tests/training.test.cjs` (Node 20 oder neuer, keine Abhängigkeiten).
+
+## Review der iOS-Vorbereitung und kompakter Trainingsmodus
+
+[Review und Änderungen](REVIEW-CLAUDE.md): Inline-Vorschauen, Trainingsfortschritt, wiederherstellbarer kompakter Timer, barrierefreie Detail-Tabs und automatisch versionierte Offline-Updates. Die [iOS-Anleitung](NATIVE-IOS.md) beschreibt den Stand der nativen Vorbereitung und die offenen Gerätetests.
+
+Web-Deployment: `node scripts/web-build.mjs` erzeugt `_site/` mit einer aus dem Inhalt berechneten Cache-Kennung. Native Vorbereitung: `pnpm install --frozen-lockfile && pnpm run web:build`. Tests: `node --test tests/*.test.cjs`.
