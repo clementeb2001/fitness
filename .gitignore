@@ -1,3 +1,9 @@
 node_modules/
+package-lock.json
 _test.mjs
+_*.mjs
 .DS_Store
+
+# Capacitor
+www/
+ios/

@@ -1,0 +1,17 @@
+{
+  "appId": "com.einsatzfit.app",
+  "appName": "EinsatzFit",
+  "webDir": "www",
+  "backgroundColor": "#0e1622",
+  "ios": {
+    "backgroundColor": "#0e1622",
+    "contentInset": "always"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "backgroundColor": "#0e1622",
+      "launchShowDuration": 500,
+      "showSpinner": false
+    }
+  }
+}

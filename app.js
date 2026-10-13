@@ -1596,7 +1596,12 @@
       o.start(t); o.stop(t + (dur || 0.15));
     } catch (e) {}
   }
-  function buzz(ms) { if (navigator.vibrate) { try { navigator.vibrate(ms || 120); } catch (e) {} } }
+  function buzz(ms) {
+    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Haptics) {
+      try { window.Capacitor.Plugins.Haptics.impact({ style: 'MEDIUM' }); return; } catch (e) {}
+    }
+    if (navigator.vibrate) { try { navigator.vibrate(ms || 120); } catch (e) {} }
+  }
   function doneSignal() { beep(1047, 0.22); setTimeout(function () { beep(1319, 0.28); }, 180); buzz(300); }
 
   function onTimerClick(ev) {
@@ -1665,6 +1670,13 @@
     try { return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; } catch (e) { return false; }
   }
   function isIOS() { return /iphone|ipad|ipod/i.test(navigator.userAgent); }
+  function isNative() { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); }
+  function nativeInit() {
+    if (!isNative() || !window.Capacitor || !window.Capacitor.Plugins) return;
+    var P = window.Capacitor.Plugins;
+    try { if (P.StatusBar) { P.StatusBar.setStyle({ style: 'DARK' }); P.StatusBar.setBackgroundColor({ color: '#0e1622' }); } } catch (e) {}
+    try { if (P.SplashScreen) P.SplashScreen.hide(); } catch (e) {}
+  }
 
   function toastDOM() {
     var el = document.getElementById('ef-toast');
@@ -1683,7 +1695,7 @@
   function hideToast() { var el = document.getElementById('ef-toast'); if (el) el.classList.add('hidden'); }
 
   function installHintHTML() {
-    if (isStandalone() || state.hideInstallHint) return '';
+    if (isNative() || isStandalone() || state.hideInstallHint) return '';
     var body = isIOS()
       ? 'Installiere EinsatzFit als App: In Safari <b>Teilen</b> ⎋ antippen → <b>„Zum Home-Bildschirm"</b>.'
       : 'Installiere EinsatzFit als App für Offline-Nutzung und Vollbild.';
@@ -1696,6 +1708,7 @@
   }
 
   function registerSW() {
+    if (isNative()) return; // in der nativen App liefert Capacitor die Dateien aus
     if (!('serviceWorker' in navigator)) return;
     navigator.serviceWorker.register('sw.js').then(function (reg) {
       efReg = reg;
@@ -1738,6 +1751,7 @@
     window.addEventListener('appinstalled', function () { efDeferredPrompt = null; state.hideInstallHint = true; save(); });
 
     render();
+    nativeInit();
     if ('serviceWorker' in navigator) window.addEventListener('load', registerSW);
   }
 
