@@ -1,7 +1,6 @@
-/* Service Worker – Cache-first-Strategie für Offline-Nutzung.
-   Beim Ändern von Dateien die CACHE-Version erhöhen, damit alte Caches
-   entfernt und neue Dateien geladen werden. */
-const CACHE = 'fit-wieder-starten-v1';
+/* EinsatzFit – Service Worker. Cache-first für Offline-Nutzung.
+   Bei Datei-Änderungen CACHE-Version erhöhen → alte Caches werden ersetzt. */
+const CACHE = 'einsatzfit-v2';
 
 const ASSETS = [
   './',
@@ -13,15 +12,11 @@ const ASSETS = [
   './icon-512.png'
 ];
 
-// Beim Installieren alle Kern-Dateien in den Cache legen.
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(ASSETS))
-  );
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
   self.skipWaiting();
 });
 
-// Beim Aktivieren alte Cache-Versionen aufräumen.
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
@@ -31,28 +26,22 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Cache-first: zuerst im Cache suchen, sonst aus dem Netz laden (und cachen).
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
-
   event.respondWith(
     caches.match(req).then((cached) => {
       if (cached) return cached;
       return fetch(req)
         .then((res) => {
-          // Nur erfolgreiche, gleiche-Origin-Antworten cachen.
           if (res && res.status === 200 && res.type === 'basic') {
             const copy = res.clone();
-            caches.open(CACHE).then((cache) => cache.put(req, copy));
+            caches.open(CACHE).then((c) => c.put(req, copy));
           }
           return res;
         })
         .catch(() => {
-          // Offline und nicht im Cache: für Navigationen die App-Shell liefern.
-          if (req.mode === 'navigate') {
-            return caches.match('./index.html');
-          }
+          if (req.mode === 'navigate') return caches.match('./index.html');
           return new Response('', { status: 504, statusText: 'Offline' });
         });
     })

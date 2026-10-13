@@ -1,519 +1,318 @@
 /* =========================================================================
-   „Fit wieder starten“ – Vanilla-JS-PWA
-   Alles clientseitig. Persistenz: ein localStorage-Key mit dem State als JSON.
-   Keine Frameworks, keine externen Abhängigkeiten.
+   EinsatzFit — Trainings-App für Einsatzkräfte (Polizei / Feuerwehr / Ski)
+   Vanilla JS, Hash-Routing, State in einem localStorage-Key. Zero Dependencies.
+   Kernideen:
+   - ORTE mit eigenem Material (Wache / Zuhause / Unterwegs ...) – vor jeder
+     Einheit wählbar; der Plan passt sich dem Material des Ortes an.
+   - Tägliche BESCHWERDEN -> automatische sichere Ersatz-Übungen (Kaskade).
+   - Voll einstellbar: Einheiten/Woche UND Dauer pro Einheit (Plan skaliert).
+   - Schwerpunkt Polizei/Feuerwehr, Ski als leichter Winter-Zusatz.
    ========================================================================= */
 (function () {
   'use strict';
 
-  const STORAGE_KEY = 'fit-wieder-starten-state-v1';
+  const KEY = 'einsatzfit-state-v1';
 
   /* ----------------------------------------------------------------------
-     Labels
+     Kataloge
      ---------------------------------------------------------------------- */
-  const COMPLAINT_LABELS = {
-    ruecken: 'Rücken',
-    schulter: 'Schulter',
-    knie: 'Knie',
-    handgelenk: 'Handgelenk'
+  const EQUIP = {
+    kurzhanteln:    { label: 'Kurzhanteln',     icon: '🏋️' },
+    langhantel:     { label: 'Langhantel',      icon: '🏋️' },
+    kettlebell:     { label: 'Kettlebell',      icon: '🔔' },
+    band:           { label: 'Widerstandsband', icon: '🎗️' },
+    klimmzugstange: { label: 'Klimmzugstange',  icon: '🙆' },
+    gewichtsweste:  { label: 'Gewichtsweste',   icon: '🦺' },
+    box:            { label: 'Erhöhung / Bank', icon: '🪑' },
+    matte:          { label: 'Matte',           icon: '🟦' },
+    cardio:         { label: 'Cardiogerät',     icon: '🚣' },
+    rucksack:       { label: 'Rucksack / Last', icon: '🎒' },
+    springseil:     { label: 'Springseil',      icon: '➰' }
   };
-  const EQUIP_LABELS = {
-    kurzhanteln: 'Kurzhanteln',
-    widerstandsband: 'Widerstandsband',
-    matte: 'Matte'
+
+  const COMPLAINTS = {
+    ruecken:     { label: 'Rücken',      icon: '🔙' },
+    schulter:    { label: 'Schulter',    icon: '💪' },
+    knie:        { label: 'Knie',        icon: '🦵' },
+    handgelenk:  { label: 'Handgelenk',  icon: '✋' },
+    ellenbogen:  { label: 'Ellenbogen',  icon: '💪' },
+    sprunggelenk:{ label: 'Sprunggelenk',icon: '🦶' },
+    nacken:      { label: 'Nacken',      icon: '🧣' }
   };
-  const ORDER = ['A', 'B', 'C']; // Kraft-Rotation
+
+  const WINTER_MONTHS = [9, 10, 11, 0, 1, 2]; // Okt–Mär (0-basiert)
 
   /* ----------------------------------------------------------------------
      Übungsdatenbank
-     Jede Übung: equipment[] (benötigtes Material), loads[] (belastete Regionen),
-     alternatives[] (Ausweichkette, kaskadierend bis eine sichere passt).
-     Terminale Alternativen benötigen kein Material und belasten nichts.
+     equipment: "mindestens eines davon nötig" ([] = nur Körpergewicht).
+     loads: belastete Regionen. alternatives: sichere Ausweichkette.
+     min: geschätzte Minuten (für Dauer-Skalierung).
      ---------------------------------------------------------------------- */
-  const EXERCISES = {
-    /* ---- Unterkörper ---- */
-    goblet_squat: {
-      id: 'goblet_squat', name: 'Goblet-Kniebeuge', emoji: '🏋️',
-      target: 'Oberschenkel, Gesäß, Rumpf',
-      equipment: ['kurzhanteln'], loads: ['knie'],
-      sets: 3, reps: '10–12',
-      alternatives: ['band_squat', 'bw_squat'],
-      steps: [
-        'Eine Kurzhantel senkrecht vor der Brust halten, Ellenbogen zeigen nach unten.',
-        'Füße schulterbreit, Zehen leicht nach außen.',
-        'Hüfte nach hinten und unten schieben, Knie in Richtung der Zehen, Rücken gerade.',
-        'Kontrolliert bis kurz vor die Parallele, dann durch die Fersen nach oben drücken.'
-      ]
-    },
-    band_squat: {
-      id: 'band_squat', name: 'Kniebeuge mit Band', emoji: '🦵',
-      target: 'Oberschenkel, Gesäß',
-      equipment: ['widerstandsband'], loads: ['knie'],
-      sets: 3, reps: '12–15',
-      alternatives: ['bw_squat'],
-      steps: [
-        'Band unter beide Füße stellen, Enden auf Schulterhöhe halten.',
-        'Schulterbreiter Stand, Rumpf fest.',
-        'In die Knie gehen, Spannung im Band halten.',
-        'Kontrolliert nach oben drücken.'
-      ]
-    },
-    bw_squat: {
-      id: 'bw_squat', name: 'Kniebeuge mit Körpergewicht', emoji: '🦵',
-      target: 'Oberschenkel, Gesäß',
-      equipment: [], loads: ['knie'],
-      sets: 3, reps: '15',
-      alternatives: ['box_squat'],
-      steps: [
-        'Schulterbreiter Stand, Arme zur Balance nach vorn.',
-        'Hüfte nach hinten schieben, langsam absenken.',
-        'So tief wie schmerzfrei möglich, Knie stabil.',
-        'Nach oben drücken, Gesäß anspannen.'
-      ]
-    },
-    box_squat: {
-      id: 'box_squat', name: 'Aufstehen vom Stuhl', emoji: '🪑',
-      target: 'Oberschenkel, Gesäß (gelenkschonend)',
-      equipment: [], loads: [],
-      sets: 3, reps: '12',
-      alternatives: ['glute_bridge'],
-      steps: [
-        'Vor einen stabilen Stuhl stellen.',
-        'Langsam hinsetzen, ohne komplett abzusitzen.',
-        'Kurz Kontakt, dann kontrolliert wieder aufstehen.',
-        'Kleiner Bewegungsradius, ganz ohne Schmerz.'
-      ]
-    },
-    rdl: {
-      id: 'rdl', name: 'Kreuzheben mit Kurzhanteln', emoji: '🏋️',
-      target: 'Rückseite Oberschenkel, Gesäß, unterer Rücken',
-      equipment: ['kurzhanteln'], loads: ['ruecken'],
-      sets: 3, reps: '10–12',
-      alternatives: ['hip_thrust', 'glute_bridge'],
-      steps: [
-        'Kurzhanteln vor den Oberschenkeln halten.',
-        'Leichte Kniebeugung, Rücken gerade.',
-        'Hüfte nach hinten schieben, Hanteln nah am Bein absenken.',
-        'Wenn Zug in der Oberschenkelrückseite, wieder aufrichten.'
-      ]
-    },
-    hip_thrust: {
-      id: 'hip_thrust', name: 'Hip Thrust', emoji: '🍑',
-      target: 'Gesäß, Rückseite Oberschenkel',
-      equipment: ['kurzhanteln'], loads: [],
-      sets: 3, reps: '12',
-      alternatives: ['glute_bridge'],
-      steps: [
-        'Oberer Rücken an eine Couch/Bank gelehnt, Füße aufgestellt.',
-        'Kurzhantel auf der Hüfte abstützen (gepolstert).',
-        'Hüfte nach oben drücken, bis Oberkörper und Oberschenkel eine Linie bilden.',
-        'Oben Gesäß anspannen, langsam ablassen.'
-      ]
-    },
-    glute_bridge: {
-      id: 'glute_bridge', name: 'Beckenheben (Glute Bridge)', emoji: '🍑',
-      target: 'Gesäß, Rumpf (rückenschonend)',
-      equipment: [], loads: [],
-      sets: 3, reps: '15',
-      alternatives: [],
-      steps: [
-        'Auf den Rücken legen, Knie angewinkelt, Füße aufgestellt.',
-        'Bauch leicht anspannen.',
-        'Hüfte nach oben drücken, oben kurz halten.',
-        'Langsam ablassen, ohne komplett abzulegen.'
-      ]
-    },
-    lunge: {
-      id: 'lunge', name: 'Ausfallschritt mit Kurzhanteln', emoji: '🦵',
-      target: 'Oberschenkel, Gesäß, Balance',
-      equipment: ['kurzhanteln'], loads: ['knie'],
-      sets: 3, reps: '10 je Seite',
-      alternatives: ['bw_lunge', 'glute_bridge'],
-      steps: [
-        'Kurzhanteln seitlich halten, aufrechter Stand.',
-        'Einen Schritt nach vorn, hinteres Knie Richtung Boden.',
-        'Vorderes Knie über dem Fußgelenk, nicht darüber hinaus.',
-        'Zurückdrücken in den Stand, Seite wechseln.'
-      ]
-    },
-    bw_lunge: {
-      id: 'bw_lunge', name: 'Ausfallschritt ohne Gewicht', emoji: '🦵',
-      target: 'Oberschenkel, Gesäß, Balance',
-      equipment: [], loads: ['knie'],
-      sets: 3, reps: '10 je Seite',
-      alternatives: ['box_squat'],
-      steps: [
-        'Aufrechter Stand, Hände in die Hüfte.',
-        'Schritt nach vorn, kontrolliert absenken.',
-        'Kleiner, schmerzfreier Bewegungsradius.',
-        'Zurück in den Stand, Seite wechseln.'
-      ]
-    },
-    calf_raise: {
-      id: 'calf_raise', name: 'Wadenheben', emoji: '🦶',
-      target: 'Waden',
-      equipment: [], loads: [],
-      sets: 3, reps: '15–20',
-      alternatives: [],
-      steps: [
-        'Aufrechter Stand, ggf. an der Wand abstützen.',
-        'Langsam auf die Fußballen heben.',
-        'Oben kurz halten.',
-        'Kontrolliert absenken.'
-      ]
-    },
+  const EX = {
+    /* ---- Unterkörper / Hinge ---- */
+    back_squat: { id:'back_squat', name:'Kniebeuge (mit Gewicht)', emoji:'🏋️',
+      target:'Oberschenkel, Gesäß, Rumpf', equipment:['langhantel','kurzhanteln','kettlebell','gewichtsweste'], loads:['knie'],
+      sets:4, reps:'6–10', min:8, alternatives:['bw_squat'],
+      steps:['Gewicht stabil am Körper/Schulter positionieren.','Schulterbreiter Stand, Rumpf fest, Blick nach vorn.','Hüfte nach hinten/unten, Knie Richtung Zehen, Rücken gerade.','Durch die Fersen nach oben drücken.'],
+      coach:'Tiefe nur so weit, wie die Technik sauber bleibt. Sauber vor schwer.' },
+    bw_squat: { id:'bw_squat', name:'Kniebeuge Eigengewicht', emoji:'🦵',
+      target:'Oberschenkel, Gesäß', equipment:[], loads:['knie'], sets:3, reps:'15–20', min:5, alternatives:['box_squat'],
+      steps:['Schulterbreiter Stand, Arme zur Balance nach vorn.','Hüfte nach hinten, kontrolliert absenken.','So tief wie schmerzfrei möglich.','Nach oben drücken, Gesäß anspannen.'] },
+    box_squat: { id:'box_squat', name:'Kniebeuge zum Kasten', emoji:'🪑',
+      target:'Oberschenkel, Gesäß (gelenkschonend)', equipment:[], loads:[], sets:3, reps:'12', min:5, alternatives:[],
+      steps:['Vor eine stabile Erhöhung/Stuhl stellen.','Kontrolliert zum Kasten absenken, kurz antippen.','Ohne Schwung wieder aufstehen.','Kleiner, schmerzfreier Bewegungsradius.'] },
+    deadlift: { id:'deadlift', name:'Kreuzheben', emoji:'🏋️',
+      target:'Rückseite, Gesäß, unterer Rücken', equipment:['langhantel','kurzhanteln','kettlebell'], loads:['ruecken'], sets:4, reps:'5–8', min:8, alternatives:['hip_thrust','glute_bridge'],
+      steps:['Gewicht dicht am Körper, Füße hüftbreit.','Brust raus, Rücken gerade, Lat-Spannung.','Hüfte und Knie strecken, Gewicht nah am Bein führen.','Kontrolliert ablassen, Rücken bleibt neutral.'],
+      coach:'Neutraler Rücken ist Pflicht. Bei Rückenthema automatisch Hip Thrust.' },
+    rdl: { id:'rdl', name:'Rumänisches Kreuzheben', emoji:'🏋️',
+      target:'Beinrückseite, Gesäß', equipment:['langhantel','kurzhanteln','kettlebell'], loads:['ruecken'], sets:3, reps:'8–12', min:7, alternatives:['hip_thrust','glute_bridge'],
+      steps:['Gewicht vor den Oberschenkeln, leichte Kniebeugung.','Hüfte nach hinten schieben, Rücken gerade.','Gewicht nah am Bein absenken bis Zug hinten.','Hüfte nach vorn strecken, aufrichten.'] },
+    hip_thrust: { id:'hip_thrust', name:'Hip Thrust', emoji:'🍑',
+      target:'Gesäß, Beinrückseite', equipment:['langhantel','kurzhanteln','kettlebell'], loads:[], sets:3, reps:'10–12', min:6, alternatives:['glute_bridge'],
+      steps:['Oberer Rücken an Bank/Couch, Gewicht gepolstert auf der Hüfte.','Füße aufgestellt, hüftbreit.','Hüfte nach oben bis Körper gerade, Gesäß fest.','Kontrolliert ablassen.'] },
+    glute_bridge: { id:'glute_bridge', name:'Beckenheben', emoji:'🍑',
+      target:'Gesäß, Rumpf (rückenschonend)', equipment:[], loads:[], sets:3, reps:'15', min:4, alternatives:[],
+      steps:['Rücklings, Knie angewinkelt, Füße aufgestellt.','Bauch leicht anspannen.','Hüfte nach oben drücken, oben halten.','Langsam ablassen.'] },
+    split_squat: { id:'split_squat', name:'Bulgarian Split Squat', emoji:'🦵',
+      target:'Beine einseitig, Balance', equipment:['kurzhanteln','kettlebell','gewichtsweste'], loads:['knie'], sets:3, reps:'8–10 / Seite', min:7, alternatives:['bw_split_squat','step_up'],
+      steps:['Hinteren Fuß erhöht ablegen, Gewicht seitlich halten.','Aufrechter Oberkörper.','Vorderes Bein kontrolliert beugen.','Durch die Ferse nach oben drücken.'] },
+    bw_split_squat: { id:'bw_split_squat', name:'Ausfallschritt Eigengewicht', emoji:'🦵',
+      target:'Beine einseitig, Balance', equipment:[], loads:['knie'], sets:3, reps:'10 / Seite', min:5, alternatives:['box_squat'],
+      steps:['Aufrechter Stand, Hände in die Hüfte.','Schritt nach vorn, kontrolliert absenken.','Vorderes Knie über dem Fuß.','Zurück in den Stand, Seite wechseln.'] },
+    step_up: { id:'step_up', name:'Step-Ups (mit Last optional)', emoji:'🪜',
+      target:'Beine, Kondition, Einsatz-Spezifik', equipment:['box'], loads:['knie'], sets:3, reps:'10 / Seite', min:6, alternatives:['bw_split_squat','box_squat'],
+      steps:['Auf stabile Erhöhung/Treppe steigen.','Ganzen Fuß aufsetzen, über die Ferse hochdrücken.','Oben kurz Balance, kontrolliert absteigen.','Last als Rucksack/Weste möglich (Treppen-Spezifik Feuerwehr).'],
+      coach:'Treppen mit Last = Feuerwehr-Realität. Kontrolliert absteigen schont die Knie.' },
+    walking_lunge: { id:'walking_lunge', name:'Gehende Ausfallschritte', emoji:'🚶',
+      target:'Beine, Gesäß, Stabilität', equipment:[], loads:['knie'], sets:3, reps:'10 / Seite', min:5, alternatives:['box_squat'],
+      steps:['Aufrecht, optional Gewicht seitlich.','Schritt nach vorn, hinteres Knie Richtung Boden.','Vorderes Knie stabil über dem Fuß.','Abdrücken in den nächsten Schritt.'] },
+    calf_raise: { id:'calf_raise', name:'Wadenheben', emoji:'🦶',
+      target:'Waden, Sprunggelenk', equipment:[], loads:[], sets:3, reps:'15–20', min:4, alternatives:[],
+      steps:['Aufrecht, ggf. an Wand abstützen.','Langsam auf die Fußballen.','Oben kurz halten.','Kontrolliert ablassen.'] },
 
-    /* ---- Oberkörper (schulterschonend) ---- */
-    db_row: {
-      id: 'db_row', name: 'Kurzhantel-Rudern', emoji: '💪',
-      target: 'Oberer Rücken, hintere Schulter, Bizeps',
-      equipment: ['kurzhanteln'], loads: [],
-      sets: 3, reps: '10–12',
-      alternatives: ['band_row'],
-      steps: [
-        'Mit einer Hand auf Stuhl/Couch abstützen, Rücken gerade.',
-        'Kurzhantel in der anderen Hand hängen lassen.',
-        'Ellenbogen eng am Körper nach hinten ziehen.',
-        'Schulterblatt zusammen, langsam ablassen.'
-      ]
-    },
-    band_row: {
-      id: 'band_row', name: 'Rudern mit Band', emoji: '💪',
-      target: 'Oberer Rücken, hintere Schulter',
-      equipment: ['widerstandsband'], loads: [],
-      sets: 3, reps: '15',
-      alternatives: ['bird_dog'],
-      steps: [
-        'Band um einen festen Punkt (Türanker/Heizung) auf Brusthöhe.',
-        'Enden greifen, Arme gestreckt, leichte Vorspannung.',
-        'Ellenbogen nach hinten ziehen, Schulterblätter zusammen.',
-        'Langsam zurückführen.'
-      ]
-    },
-    floor_press: {
-      id: 'floor_press', name: 'Bankdrücken am Boden (Floor Press)', emoji: '💪',
-      target: 'Brust, Trizeps (schulterschonend, kurzer Weg)',
-      equipment: ['kurzhanteln'], loads: ['schulter'],
-      sets: 3, reps: '10–12',
-      alternatives: ['pushup_knee', 'wall_pushup'],
-      steps: [
-        'Auf den Rücken legen, Knie angewinkelt, Kurzhanteln über der Brust.',
-        'Ellenbogen bis zum Boden absenken (natürlicher Stopp, schont Schulter).',
-        'Kurz halten.',
-        'Wieder nach oben drücken.'
-      ]
-    },
-    pushup: {
-      id: 'pushup', name: 'Liegestütz', emoji: '💪',
-      target: 'Brust, Schulter, Trizeps, Rumpf',
-      equipment: [], loads: ['schulter', 'handgelenk'],
-      sets: 3, reps: '8–12',
-      alternatives: ['pushup_knee', 'wall_pushup'],
-      steps: [
-        'Hände etwas breiter als schulterbreit, Körper in einer Linie.',
-        'Rumpf anspannen.',
-        'Kontrolliert absenken, Ellenbogen leicht nach hinten.',
-        'Nach oben drücken.'
-      ]
-    },
-    pushup_knee: {
-      id: 'pushup_knee', name: 'Liegestütz auf den Knien', emoji: '💪',
-      target: 'Brust, Trizeps (leichter)',
-      equipment: [], loads: ['schulter', 'handgelenk'],
-      sets: 3, reps: '10–12',
-      alternatives: ['wall_pushup'],
-      steps: [
-        'Knie am Boden, Hände unter den Schultern.',
-        'Körper von Kopf bis Knie in einer Linie.',
-        'Kontrolliert absenken.',
-        'Nach oben drücken.'
-      ]
-    },
-    wall_pushup: {
-      id: 'wall_pushup', name: 'Liegestütz an der Wand', emoji: '🧱',
-      target: 'Brust, Schulter (sehr gelenkschonend)',
-      equipment: [], loads: [],
-      sets: 3, reps: '12–15',
-      alternatives: [],
-      steps: [
-        'Armlänge vor eine Wand stellen, Hände auf Brusthöhe an die Wand.',
-        'Körper gerade, Rumpf fest.',
-        'Kontrolliert zur Wand beugen.',
-        'Wieder wegdrücken.'
-      ]
-    },
-    band_pullapart: {
-      id: 'band_pullapart', name: 'Band auseinanderziehen', emoji: '🎗️',
-      target: 'Obere Rücken- & Schultermuskulatur (Haltung)',
-      equipment: ['widerstandsband'], loads: [],
-      sets: 3, reps: '15',
-      alternatives: ['scapular_squeeze'],
-      steps: [
-        'Band mit beiden Händen auf Brusthöhe greifen, Arme vorn.',
-        'Band nach außen ziehen, Arme öffnen.',
-        'Schulterblätter zusammenziehen.',
-        'Langsam zurückführen.'
-      ]
-    },
-    scapular_squeeze: {
-      id: 'scapular_squeeze', name: 'Schulterblätter zusammenziehen', emoji: '🧍',
-      target: 'Haltungsmuskulatur (ohne Material)',
-      equipment: [], loads: [],
-      sets: 3, reps: '15',
-      alternatives: [],
-      steps: [
-        'Aufrecht stehen oder sitzen, Arme locker.',
-        'Schulterblätter langsam nach hinten/unten zusammenziehen.',
-        'Kurz halten.',
-        'Langsam lösen.'
-      ]
-    },
-    biceps_curl: {
-      id: 'biceps_curl', name: 'Bizeps-Curl mit Kurzhanteln', emoji: '💪',
-      target: 'Bizeps',
-      equipment: ['kurzhanteln'], loads: ['handgelenk'],
-      sets: 3, reps: '10–12',
-      alternatives: ['band_curl', 'iso_curl'],
-      steps: [
-        'Kurzhanteln seitlich halten, Ellenbogen am Körper.',
-        'Unterarme nach oben führen.',
-        'Oben kurz anspannen.',
-        'Langsam ablassen.'
-      ]
-    },
-    band_curl: {
-      id: 'band_curl', name: 'Bizeps-Curl mit Band', emoji: '🎗️',
-      target: 'Bizeps',
-      equipment: ['widerstandsband'], loads: ['handgelenk'],
-      sets: 3, reps: '15',
-      alternatives: ['iso_curl'],
-      steps: [
-        'Band unter die Füße stellen, Enden greifen.',
-        'Ellenbogen am Körper, nach oben curlen.',
-        'Oben anspannen.',
-        'Langsam ablassen.'
-      ]
-    },
-    iso_curl: {
-      id: 'iso_curl', name: 'Isometrischer Bizeps-Halt', emoji: '💪',
-      target: 'Bizeps (ohne Material, handgelenkschonend)',
-      equipment: [], loads: [],
-      sets: 3, reps: '20–30 Sek',
-      alternatives: [],
-      steps: [
-        'Unterarm im 90°-Winkel, Handfläche nach oben.',
-        'Mit der anderen Hand dagegen drücken.',
-        'Spannung 20–30 Sekunden halten.',
-        'Locker lassen, Seite wechseln.'
-      ]
-    },
-    triceps_kickback: {
-      id: 'triceps_kickback', name: 'Trizeps-Kickback', emoji: '💪',
-      target: 'Trizeps',
-      equipment: ['kurzhanteln'], loads: [],
-      sets: 3, reps: '12',
-      alternatives: ['band_pushdown', 'bench_dip'],
-      steps: [
-        'Leicht vorgebeugt, Oberarm parallel zum Körper.',
-        'Kurzhantel halten, Ellenbogen fixiert.',
-        'Unterarm nach hinten strecken.',
-        'Langsam zurückführen.'
-      ]
-    },
-    band_pushdown: {
-      id: 'band_pushdown', name: 'Trizeps-Drücken mit Band', emoji: '🎗️',
-      target: 'Trizeps',
-      equipment: ['widerstandsband'], loads: [],
-      sets: 3, reps: '15',
-      alternatives: ['bench_dip'],
-      steps: [
-        'Band oben (Tür/Haken) befestigen.',
-        'Ellenbogen am Körper, Unterarme nach unten drücken.',
-        'Unten kurz anspannen.',
-        'Langsam zurück.'
-      ]
-    },
-    bench_dip: {
-      id: 'bench_dip', name: 'Trizeps-Dips an der Kante', emoji: '🪑',
-      target: 'Trizeps',
-      equipment: [], loads: ['schulter'],
-      sets: 3, reps: '10–12',
-      alternatives: ['wall_pushup'],
-      steps: [
-        'Hände auf Stuhlkante, Gesäß davor.',
-        'Ellenbogen kontrolliert beugen.',
-        'Nur so tief, wie die Schulter schmerzfrei erlaubt.',
-        'Nach oben drücken.'
-      ]
-    },
+    /* ---- Oberkörper Druck ---- */
+    bench_press: { id:'bench_press', name:'Bankdrücken', emoji:'💪',
+      target:'Brust, Schulter, Trizeps', equipment:['langhantel','kurzhanteln'], loads:['schulter'], sets:4, reps:'6–10', min:8, alternatives:['floor_press','pushup'],
+      steps:['Auf Bank/Boden, Gewicht über der Brust.','Schulterblätter zusammen, Spannung.','Kontrolliert zur Brust senken.','Kraftvoll nach oben drücken.'] },
+    floor_press: { id:'floor_press', name:'Floor Press', emoji:'💪',
+      target:'Brust, Trizeps (schulterschonend)', equipment:['kurzhanteln','kettlebell'], loads:['schulter'], sets:3, reps:'8–12', min:6, alternatives:['pushup','pushup_knee'],
+      steps:['Rücklings, Knie angewinkelt, Gewicht über Brust.','Ellenbogen bis zum Boden senken (natürlicher Stopp).','Kurz halten.','Nach oben drücken.'] },
+    ohp: { id:'ohp', name:'Überkopfdrücken', emoji:'🙌',
+      target:'Schulter, Trizeps, Rumpf', equipment:['langhantel','kurzhanteln','kettlebell'], loads:['schulter'], sets:3, reps:'6–10', min:7, alternatives:['floor_press','pushup_knee'],
+      steps:['Gewicht auf Schulterhöhe, Rumpf fest.','Gerade nach oben drücken, Kopf leicht durch.','Oben kurz stabilisieren.','Kontrolliert zurück.'],
+      coach:'Bei Schulterthema automatisch auf schonendes Drücken umgestellt.' },
+    pushup: { id:'pushup', name:'Liegestütz', emoji:'💪',
+      target:'Brust, Schulter, Rumpf', equipment:[], loads:['schulter','handgelenk'], sets:3, reps:'10–20', min:5, alternatives:['pushup_knee','incline_pushup','wall_pushup'],
+      steps:['Hände etwas breiter als schulterbreit, Körper in Linie.','Rumpf fest.','Kontrolliert absenken, Ellenbogen leicht nach hinten.','Nach oben drücken.'] },
+    pushup_knee: { id:'pushup_knee', name:'Liegestütz auf Knien', emoji:'💪',
+      target:'Brust, Trizeps', equipment:[], loads:['schulter','handgelenk'], sets:3, reps:'10–15', min:4, alternatives:['incline_pushup','wall_pushup'],
+      steps:['Knie am Boden, Hände unter den Schultern.','Körper von Kopf bis Knie gerade.','Kontrolliert absenken.','Nach oben drücken.'] },
+    incline_pushup: { id:'incline_pushup', name:'Liegestütz erhöht', emoji:'💪',
+      target:'Brust (leichter)', equipment:['box'], loads:['schulter','handgelenk'], sets:3, reps:'12', min:4, alternatives:['wall_pushup'],
+      steps:['Hände auf stabile Erhöhung.','Körper gerade.','Kontrolliert zur Kante senken.','Wegdrücken.'] },
+    wall_pushup: { id:'wall_pushup', name:'Wand-Liegestütz', emoji:'🧱',
+      target:'Brust, Schulter (sehr schonend)', equipment:[], loads:[], sets:3, reps:'15', min:4, alternatives:[],
+      steps:['Armlänge vor der Wand, Hände auf Brusthöhe.','Körper gerade, Rumpf fest.','Zur Wand beugen.','Wegdrücken.'] },
 
-    /* ---- Kraft & Stabilität / Rumpf ---- */
-    plank: {
-      id: 'plank', name: 'Unterarmstütz (Plank)', emoji: '🧘',
-      target: 'Rumpf, Schultergürtel',
-      equipment: [], loads: ['schulter'],
-      sets: 3, reps: '20–40 Sek',
-      alternatives: ['dead_bug'],
-      steps: [
-        'Auf die Unterarme stützen, Ellenbogen unter den Schultern.',
-        'Körper von Kopf bis Ferse in einer Linie.',
-        'Bauch und Gesäß anspannen.',
-        'Ruhig atmen und Position halten.'
-      ]
-    },
-    dead_bug: {
-      id: 'dead_bug', name: 'Dead Bug', emoji: '🧘',
-      target: 'Tiefe Bauchmuskulatur (rückenschonend)',
-      equipment: [], loads: [],
-      sets: 3, reps: '10 je Seite',
-      alternatives: [],
-      steps: [
-        'Auf den Rücken, Arme senkrecht nach oben, Knie im 90°-Winkel.',
-        'Unteren Rücken flach am Boden halten.',
-        'Gegenüberliegenden Arm und Bein langsam ausstrecken.',
-        'Zurückführen, Seite wechseln.'
-      ]
-    },
-    bird_dog: {
-      id: 'bird_dog', name: 'Bird Dog', emoji: '🧘',
-      target: 'Rückenstrecker, Rumpfstabilität',
-      equipment: [], loads: [],
-      sets: 3, reps: '10 je Seite',
-      alternatives: [],
-      steps: [
-        'Vierfüßlerstand, Hände unter Schultern, Knie unter Hüfte.',
-        'Rücken gerade, Bauch leicht fest.',
-        'Gegenüberliegenden Arm und Bein ausstrecken.',
-        'Kurz halten, langsam zurück, Seite wechseln.'
-      ]
-    },
-    side_plank: {
-      id: 'side_plank', name: 'Seitstütz', emoji: '🧘',
-      target: 'Seitliche Rumpfmuskulatur',
-      equipment: [], loads: ['schulter'],
-      sets: 3, reps: '20 Sek je Seite',
-      alternatives: ['side_plank_knee'],
-      steps: [
-        'Seitlich auf den Unterarm stützen.',
-        'Hüfte nach oben, Körper in einer Linie.',
-        'Position halten.',
-        'Seite wechseln.'
-      ]
-    },
-    side_plank_knee: {
-      id: 'side_plank_knee', name: 'Seitstütz auf dem Knie', emoji: '🧘',
-      target: 'Seitliche Rumpfmuskulatur (leichter)',
-      equipment: [], loads: [],
-      sets: 3, reps: '20 Sek je Seite',
-      alternatives: ['dead_bug'],
-      steps: [
-        'Seitlich auf den Unterarm, unteres Knie abgelegt.',
-        'Hüfte anheben.',
-        'Position ruhig halten.',
-        'Seite wechseln.'
-      ]
-    },
-    superman: {
-      id: 'superman', name: 'Rückenstrecker (Superman)', emoji: '🦸',
-      target: 'Unterer Rücken, Gesäß',
-      equipment: [], loads: ['ruecken'],
-      sets: 3, reps: '12',
-      alternatives: ['bird_dog'],
-      steps: [
-        'Auf den Bauch legen, Arme nach vorn.',
-        'Arme und Beine leicht vom Boden heben.',
-        'Kurz halten, nicht überstrecken.',
-        'Langsam ablegen.'
-      ]
-    },
-    pallof: {
-      id: 'pallof', name: 'Pallof-Press mit Band', emoji: '🎗️',
-      target: 'Anti-Rotation, tiefe Rumpfmuskulatur',
-      equipment: ['widerstandsband'], loads: [],
-      sets: 3, reps: '10 je Seite',
-      alternatives: ['dead_bug'],
-      steps: [
-        'Band seitlich auf Brusthöhe befestigen.',
-        'Seitlich zum Anker stehen, Band mit beiden Händen vor der Brust.',
-        'Arme nach vorn strecken, Rotation widerstehen.',
-        'Zurückführen, Seite wechseln.'
-      ]
-    },
-    carry: {
-      id: 'carry', name: 'Farmer’s Carry', emoji: '🏋️',
-      target: 'Griffkraft, Rumpf, Haltung',
-      equipment: ['kurzhanteln'], loads: [],
-      sets: 3, reps: '30 Sek gehen',
-      alternatives: ['bird_dog'],
-      steps: [
-        'Je eine Kurzhantel seitlich halten.',
-        'Aufrecht, Schultern zurück, Bauch fest.',
-        'Kontrolliert durch den Raum gehen.',
-        'Ruhig atmen.'
-      ]
-    }
+    /* ---- Oberkörper Zug ---- */
+    pullup: { id:'pullup', name:'Klimmzüge', emoji:'🙆',
+      target:'Rücken, Bizeps, Grip', equipment:['klimmzugstange'], loads:['schulter','ellenbogen'], sets:4, reps:'max / 5–8', min:7, alternatives:['inverted_row','db_row','band_row'],
+      steps:['Stange etwas breiter als schulterbreit greifen.','Schulterblätter aktiv nach unten.','Brust zur Stange ziehen.','Kontrolliert ablassen, volle Streckung.'],
+      coach:'Einsatzrelevant (Überwinden, Ziehen). Negativ-Wdh. wenn noch kein voller Klimmzug.' },
+    inverted_row: { id:'inverted_row', name:'Australian Rows', emoji:'🙋',
+      target:'Rücken, hintere Schulter', equipment:['klimmzugstange'], loads:[], sets:3, reps:'10–12', min:6, alternatives:['db_row','band_row'],
+      steps:['Unter niedrige Stange legen, Fersen am Boden.','Körper gerade, Griff schulterbreit.','Brust zur Stange ziehen.','Kontrolliert ablassen.'] },
+    db_row: { id:'db_row', name:'Kurzhantel-Rudern', emoji:'💪',
+      target:'Oberer Rücken, hintere Schulter', equipment:['kurzhanteln','kettlebell'], loads:[], sets:3, reps:'10–12', min:6, alternatives:['band_row','bird_dog'],
+      steps:['Eine Hand auf Bank/Knie abstützen, Rücken gerade.','Gewicht hängen lassen.','Ellenbogen eng nach hinten ziehen.','Schulterblatt zusammen, langsam ablassen.'] },
+    band_row: { id:'band_row', name:'Rudern mit Band', emoji:'🎗️',
+      target:'Oberer Rücken', equipment:['band'], loads:[], sets:3, reps:'15', min:5, alternatives:['bird_dog'],
+      steps:['Band um festen Punkt auf Brusthöhe.','Arme gestreckt, leichte Vorspannung.','Ellenbogen nach hinten, Schulterblätter zusammen.','Langsam zurückführen.'] },
+    face_pull: { id:'face_pull', name:'Face Pull', emoji:'🎗️',
+      target:'Hintere Schulter, Haltung', equipment:['band'], loads:[], sets:3, reps:'15', min:4, alternatives:['band_pullapart','scap_squeeze'],
+      steps:['Band auf Kopfhöhe befestigen.','Zu den Schläfen ziehen, Ellenbogen hoch.','Schulterblätter zusammen.','Langsam zurück.'] },
+    band_pullapart: { id:'band_pullapart', name:'Band auseinanderziehen', emoji:'🎗️',
+      target:'Obere Rücken-/Schultermuskulatur', equipment:['band'], loads:[], sets:3, reps:'15', min:4, alternatives:['scap_squeeze'],
+      steps:['Band auf Brusthöhe mit beiden Händen.','Arme öffnen, Band zur Brust.','Schulterblätter zusammenziehen.','Langsam zurück.'] },
+    scap_squeeze: { id:'scap_squeeze', name:'Schulterblätter zusammenziehen', emoji:'🧍',
+      target:'Haltung (ohne Material)', equipment:[], loads:[], sets:3, reps:'15', min:3, alternatives:[],
+      steps:['Aufrecht, Arme locker.','Schulterblätter nach hinten/unten.','Kurz halten.','Lösen.'] },
+    curl: { id:'curl', name:'Bizeps-Curl', emoji:'💪',
+      target:'Bizeps', equipment:['kurzhanteln','kettlebell','band'], loads:['handgelenk','ellenbogen'], sets:3, reps:'10–12', min:4, alternatives:['iso_curl'],
+      steps:['Gewicht seitlich, Ellenbogen am Körper.','Nach oben curlen.','Oben anspannen.','Langsam ablassen.'] },
+    iso_curl: { id:'iso_curl', name:'Isometrischer Bizeps-Halt', emoji:'💪',
+      target:'Bizeps (schonend)', equipment:[], loads:[], sets:3, reps:'20–30 Sek', min:3, alternatives:[],
+      steps:['Unterarm 90°, Handfläche nach oben.','Mit anderer Hand dagegen drücken.','Spannung halten.','Lösen, Seite wechseln.'] },
+
+    /* ---- Tragen / Grip (Einsatz-spezifisch) ---- */
+    farmers_carry: { id:'farmers_carry', name:'Farmer’s Carry', emoji:'🧳',
+      target:'Grip, Rumpf, Haltung, Ganzkörper', equipment:['kurzhanteln','kettlebell','langhantel'], loads:[], sets:3, reps:'30–40 m', min:5, alternatives:['suitcase_carry','ruck_carry','bird_dog'],
+      steps:['Je ein schweres Gewicht seitlich.','Schultern zurück, Bauch fest.','Kontrolliert gehen, ruhig atmen.','Griff bewusst fest.'],
+      coach:'Tragen unter Last = Kerneinsatz (Person/Gerät tragen). Grip nicht vernachlässigen.' },
+    suitcase_carry: { id:'suitcase_carry', name:'Koffertragen (einseitig)', emoji:'🧳',
+      target:'Seitliche Rumpfmuskulatur, Grip', equipment:['kurzhanteln','kettlebell'], loads:[], sets:3, reps:'25 m / Seite', min:5, alternatives:['bird_dog'],
+      steps:['Ein Gewicht einseitig halten.','Aufrecht bleiben, nicht zur Seite kippen.','Kontrolliert gehen.','Seite wechseln.'] },
+    ruck_carry: { id:'ruck_carry', name:'Rucksack-Marsch', emoji:'🎒',
+      target:'Ganzkörper-Ausdauer, Rücken, Beine', equipment:['rucksack'], loads:[], sets:1, reps:'10–20 Min', min:12, alternatives:['bird_dog'],
+      steps:['Rucksack mit Last gut sitzend schnüren.','Zügiges, gleichmäßiges Gehtempo.','Aufrechte Haltung, Rumpf aktiv.','Gelände/Treppen einbauen (einsatznah).'] },
+
+    /* ---- Work Capacity / Kondition ---- */
+    kb_swing: { id:'kb_swing', name:'Kettlebell Swing', emoji:'🔔',
+      target:'Hüftkraft, Kondition, Rücken', equipment:['kettlebell','kurzhanteln'], loads:['ruecken'], sets:4, reps:'15–20', min:5, alternatives:['hip_thrust','glute_bridge'],
+      steps:['Gewicht hängt zwischen den Beinen.','Explosiv Hüfte strecken, Gewicht schwingt hoch.','Rücken neutral, Kraft aus der Hüfte.','Kontrolliert zurückpendeln.'],
+      coach:'Explosiv aus der Hüfte – nicht mit dem Rücken heben. Bei Rückenthema -> Hip Thrust.' },
+    thruster: { id:'thruster', name:'Thruster (Hocke + Druck)', emoji:'🔥',
+      target:'Ganzkörper, Kondition', equipment:['kurzhanteln','kettlebell','langhantel'], loads:['knie','schulter'], sets:3, reps:'10–12', min:5, alternatives:['bw_squat','pushup_knee'],
+      steps:['Gewicht auf Schulterhöhe.','In die Kniebeuge.','Explosiv aufstehen und über Kopf drücken.','Zurück zur Schulter.'] },
+    burpee: { id:'burpee', name:'Burpees', emoji:'🔥',
+      target:'Ganzkörper-Kondition', equipment:[], loads:['knie','handgelenk','schulter'], sets:4, reps:'10–15', min:5, alternatives:['squat_thrust','fast_march'],
+      steps:['Aus dem Stand in die Hocke, Hände auf.','Beine nach hinten (Liegestützposition).','Zurück in die Hocke.','Explosiv hoch (optional Strecksprung).'] },
+    squat_thrust: { id:'squat_thrust', name:'Squat-Thrust (ohne Sprung)', emoji:'⚡',
+      target:'Kondition (gelenkschonend)', equipment:[], loads:[], sets:3, reps:'12–15', min:4, alternatives:['fast_march'],
+      steps:['In die Hocke, Hände auf.','Beine kontrolliert nach hinten.','Zurück in die Hocke.','Aufstehen – ohne Sprung.'] },
+    mountain_climber: { id:'mountain_climber', name:'Bergsteiger', emoji:'⛰️',
+      target:'Rumpf, Kondition', equipment:[], loads:['handgelenk','schulter'], sets:3, reps:'30–40 Sek', min:4, alternatives:['fast_march'],
+      steps:['Liegestützposition, Rumpf fest.','Knie abwechselnd zur Brust ziehen.','Tempo kontrolliert steigern.','Hüfte stabil.'] },
+    jump_rope: { id:'jump_rope', name:'Seilspringen', emoji:'➰',
+      target:'Kondition, Koordination', equipment:['springseil'], loads:['sprunggelenk','knie'], sets:4, reps:'45–60 Sek', min:5, alternatives:['jumping_jack','fast_march'],
+      steps:['Aufrecht, Ellenbogen am Körper.','Aus den Handgelenken drehen.','Leicht auf den Fußballen springen.','Gleichmäßiger Rhythmus.'] },
+    jumping_jack: { id:'jumping_jack', name:'Hampelmänner', emoji:'🤸',
+      target:'Kondition (ohne Gerät)', equipment:[], loads:['sprunggelenk'], sets:3, reps:'30–40', min:4, alternatives:['fast_march'],
+      steps:['Aus dem Stand Arme und Beine öffnen.','Rhythmisch springen.','Gleichmäßig atmen.','Tempo nach Gefühl.'] },
+    fast_march: { id:'fast_march', name:'Marschieren auf der Stelle', emoji:'🚶',
+      target:'Kondition (gelenkschonend)', equipment:[], loads:[], sets:3, reps:'45 Sek', min:4, alternatives:[],
+      steps:['Zügig auf der Stelle marschieren.','Knie aktiv anheben.','Arme mitschwingen.','Gleichmäßiges Tempo.'] },
+    box_jump: { id:'box_jump', name:'Box Jumps', emoji:'📦',
+      target:'Explosivkraft Beine', equipment:['box'], loads:['knie','sprunggelenk'], sets:3, reps:'8–10', min:5, alternatives:['step_up','bw_squat'],
+      steps:['Vor stabile Box/Erhöhung.','Explosiv abspringen, weich landen.','Ganzer Fuß auf der Box, aufrichten.','Kontrolliert absteigen (nicht springen).'] },
+
+    /* ---- Rumpf / Stabilität ---- */
+    plank: { id:'plank', name:'Unterarmstütz (Plank)', emoji:'🧘',
+      target:'Rumpf, Schultergürtel', equipment:[], loads:['schulter'], sets:3, reps:'30–60 Sek', min:4, alternatives:['dead_bug'],
+      steps:['Unterarme unter den Schultern.','Körper von Kopf bis Ferse gerade.','Bauch und Gesäß anspannen.','Ruhig atmen, Position halten.'] },
+    dead_bug: { id:'dead_bug', name:'Dead Bug', emoji:'🪲',
+      target:'Tiefe Bauchmuskulatur (rückenschonend)', equipment:[], loads:[], sets:3, reps:'10 / Seite', min:4, alternatives:[],
+      steps:['Rücklings, Arme senkrecht, Knie 90°.','Unteren Rücken flach halten.','Gegenüberliegenden Arm + Bein strecken.','Zurück, Seite wechseln.'] },
+    bird_dog: { id:'bird_dog', name:'Bird Dog', emoji:'🐦',
+      target:'Rückenstrecker, Rumpfstabilität', equipment:[], loads:[], sets:3, reps:'10 / Seite', min:4, alternatives:[],
+      steps:['Vierfüßlerstand, Rücken gerade.','Bauch leicht fest.','Gegenüberliegenden Arm + Bein strecken.','Kurz halten, Seite wechseln.'] },
+    side_plank: { id:'side_plank', name:'Seitstütz', emoji:'🧘',
+      target:'Seitliche Rumpfmuskulatur', equipment:[], loads:['schulter'], sets:3, reps:'20–30 Sek / Seite', min:4, alternatives:['side_plank_knee'],
+      steps:['Seitlich auf Unterarm stützen.','Hüfte nach oben, Körper in Linie.','Position halten.','Seite wechseln.'] },
+    side_plank_knee: { id:'side_plank_knee', name:'Seitstütz auf dem Knie', emoji:'🧘',
+      target:'Seitliche Rumpfmuskulatur (leichter)', equipment:[], loads:[], sets:3, reps:'25 Sek / Seite', min:3, alternatives:['dead_bug'],
+      steps:['Seitlich, unteres Knie abgelegt.','Hüfte anheben.','Ruhig halten.','Seite wechseln.'] },
+    pallof: { id:'pallof', name:'Pallof-Press', emoji:'🎗️',
+      target:'Anti-Rotation, tiefer Rumpf', equipment:['band'], loads:[], sets:3, reps:'10 / Seite', min:4, alternatives:['dead_bug'],
+      steps:['Band seitlich auf Brusthöhe.','Seitlich stehen, Band vor der Brust.','Arme nach vorn strecken, Rotation widerstehen.','Zurück, Seite wechseln.'] },
+    hollow_hold: { id:'hollow_hold', name:'Hollow Hold', emoji:'🛶',
+      target:'Rumpfspannung', equipment:[], loads:[], sets:3, reps:'20–30 Sek', min:3, alternatives:['dead_bug'],
+      steps:['Rücklings, unterer Rücken am Boden.','Arme und Beine leicht anheben.','Körper zur flachen Schale spannen.','Ruhig atmen.'] },
+    hanging_knee_raise: { id:'hanging_knee_raise', name:'Hängendes Knieheben', emoji:'🙆',
+      target:'Bauch, Grip', equipment:['klimmzugstange'], loads:[], sets:3, reps:'10–15', min:4, alternatives:['lying_leg_raise'],
+      steps:['An der Stange hängen, Schultern aktiv.','Knie kontrolliert zur Brust.','Oben kurz halten.','Langsam ablassen, nicht schwingen.'] },
+    lying_leg_raise: { id:'lying_leg_raise', name:'Beinheben liegend', emoji:'🦵',
+      target:'Unterer Bauch', equipment:[], loads:['ruecken'], sets:3, reps:'12–15', min:4, alternatives:['dead_bug'],
+      steps:['Rücklings, Hände unter dem Gesäß.','Unteren Rücken flach halten.','Beine gestreckt heben und senken.','Nicht ablegen, Spannung halten.'] },
+
+    /* ---- Ski-Prep (Winter) ---- */
+    eccentric_squat: { id:'eccentric_squat', name:'Langsame exzentrische Kniebeuge', emoji:'🎿',
+      target:'Quadrizeps exzentrisch (Ski)', equipment:[], loads:['knie'], sets:3, reps:'8 (3–4 Sek runter)', min:5, alternatives:['box_squat'],
+      steps:['Schulterbreiter Stand, optional Gewicht.','3–4 Sekunden langsam absenken.','Unten kurz halten.','Zügig aufstehen.'],
+      coach:'Exzentrik bereitet die Knie auf lange Skitage vor.' },
+    skater_jump: { id:'skater_jump', name:'Skater-Sprünge', emoji:'⛷️',
+      target:'Laterale Kraft, Balance (Ski)', equipment:[], loads:['knie','sprunggelenk'], sets:3, reps:'10 / Seite', min:5, alternatives:['lateral_stepout'],
+      steps:['Seitlich von Bein zu Bein springen.','Weich auf einem Bein landen.','Kurz stabilisieren.','Zur anderen Seite abspringen.'] },
+    lateral_stepout: { id:'lateral_stepout', name:'Seitliche Ausfallschritte', emoji:'↔️',
+      target:'Innen-/Außenseite Beine (Ski)', equipment:[], loads:['knie'], sets:3, reps:'10 / Seite', min:4, alternatives:['lateral_band_walk'],
+      steps:['Breiter Seitschritt, in ein Bein beugen.','Anderes Bein gestreckt.','Gesäß nach hinten, Rücken gerade.','Zurück zur Mitte, Seite wechseln.'] },
+    lateral_band_walk: { id:'lateral_band_walk', name:'Seitwärtsgehen mit Band', emoji:'🎗️',
+      target:'Hüftstabilität (Ski, Knie-Prävention)', equipment:['band'], loads:[], sets:3, reps:'12 / Seite', min:4, alternatives:['glute_bridge'],
+      steps:['Band um die Beine (über Knie/Knöchel).','Leichte Kniebeuge-Position.','Kontrollierte Seitschritte, Spannung halten.','Knie bleiben über den Füßen.'] },
+    step_down: { id:'step_down', name:'Step-Downs (exzentrisch)', emoji:'🪜',
+      target:'Knie-Kontrolle, Quads (Ski)', equipment:['box'], loads:['knie'], sets:3, reps:'8 / Seite', min:4, alternatives:['bw_split_squat'],
+      steps:['Auf Erhöhung stehen.','Ein Bein langsam zum Boden senken.','Ferse leicht antippen, Knie stabil.','Kontrolliert zurück.'] },
+    single_leg_balance: { id:'single_leg_balance', name:'Einbeinstand / Balance', emoji:'🧍',
+      target:'Balance, Sprunggelenk (Ski)', equipment:[], loads:[], sets:3, reps:'30 Sek / Seite', min:3, alternatives:[],
+      steps:['Auf einem Bein stehen.','Rumpf fest, Blick nach vorn.','Balance halten (Augen zu = schwerer).','Seite wechseln.'] },
+    wall_sit: { id:'wall_sit', name:'Wandsitz', emoji:'🧱',
+      target:'Isometrische Quads (Ski-Ausdauer)', equipment:[], loads:['knie'], sets:3, reps:'30–45 Sek', min:4, alternatives:['box_squat'],
+      steps:['Rücken an der Wand, Oberschenkel waagerecht.','Knie über den Knöcheln.','Position halten, ruhig atmen.','Langsam hochschieben.'] }
   };
 
   /* ----------------------------------------------------------------------
-     Workouts
+     Session-Typen & Wochenplan
      ---------------------------------------------------------------------- */
-  const WORKOUTS = {
-    A: {
-      id: 'A', name: 'Workout A · Unterkörper', kind: 'strength',
-      exercises: ['goblet_squat', 'rdl', 'lunge', 'calf_raise']
-    },
-    B: {
-      id: 'B', name: 'Workout B · Oberkörper', kind: 'strength',
-      exercises: ['db_row', 'floor_press', 'band_pullapart', 'biceps_curl', 'triceps_kickback']
-    },
-    C: {
-      id: 'C', name: 'Workout C · Kraft & Stabilität', kind: 'strength',
-      exercises: ['goblet_squat', 'pushup_knee', 'plank', 'bird_dog', 'pallof', 'carry']
-    },
-    D: {
-      id: 'D', name: 'Workout D · Ausdauer', kind: 'endurance',
-      exercises: []
-    }
+  const SESSIONS = {
+    KRAFT_A: { id:'KRAFT_A', name:'Kraft · Unterkörper & Tragen', short:'Kraft UK', icon:'🏋️',
+      tags:['Kraft','Tragen','Core'], ex:['back_squat','deadlift','split_squat','farmers_carry','hanging_knee_raise','calf_raise'] },
+    KRAFT_B: { id:'KRAFT_B', name:'Kraft · Oberkörper & Zug', short:'Kraft OK', icon:'💪',
+      tags:['Druck','Zug','Grip'], ex:['bench_press','pullup','db_row','ohp','face_pull','curl'] },
+    WORKCAP: { id:'WORKCAP', name:'Work Capacity', short:'Work Cap', icon:'🔥',
+      tags:['Kondition','Kraftausdauer'], ex:['kb_swing','thruster','burpee','step_up','mountain_climber','farmers_carry'] },
+    GANZ:    { id:'GANZ', name:'Ganzkörper-Kraft', short:'Ganzkörper', icon:'⚙️',
+      tags:['Kraft','Ganzkörper'], ex:['back_squat','bench_press','db_row','kb_swing','plank','farmers_carry'] },
+    CONDITION:{ id:'CONDITION', name:'Ausdauer & Rucking', short:'Ausdauer', icon:'🏃',
+      tags:['Ausdauer','Rucking'], conditioning:true, ex:['plank','dead_bug'] },
+    SKIPREP: { id:'SKIPREP', name:'Ski-Prep', short:'Ski-Prep', icon:'🎿',
+      tags:['Beine','Balance','Knie-Prävention'], ski:true, ex:['eccentric_squat','step_down','skater_jump','lateral_stepout','single_leg_balance','wall_sit'] }
   };
 
-  const WARMUP_TEXT = '5 Min locker machen: Armkreisen, Hüftkreisen, 15–20 Hampelmänner ' +
-    '(oder Marschieren auf der Stelle), Schulterblätter kreisen. Puls sanft hochbringen.';
-  const COOLDOWN_TEXT = '3–5 Min abwärmen: locker dehnen (Oberschenkel, Brust, Nacken), ' +
-    'tief und ruhig atmen, nachspüren.';
+  function weeklyPlan(perWeek, winter) {
+    const base = {
+      2: ['GANZ','WORKCAP'],
+      3: ['KRAFT_A','KRAFT_B','WORKCAP'],
+      4: ['KRAFT_A','KRAFT_B','WORKCAP','CONDITION'],
+      5: ['KRAFT_A','KRAFT_B','WORKCAP','CONDITION','GANZ'],
+      6: ['KRAFT_A','KRAFT_B','WORKCAP','CONDITION','GANZ','CONDITION']
+    }[Math.min(6, Math.max(2, perWeek))].slice();
 
-  /* Ausdauer: Gehen/Joggen-Intervalle über 4 Wochen; bei Knie-Beschwerde reines Gehen. */
-  function endurancePlan(week, kneeActive) {
-    if (kneeActive) {
-      return {
-        title: 'Zügiges Gehen (knieschonend)',
-        detail: '30 Min zügiges Gehen in gleichmäßigem Tempo. Kein Joggen – wegen der Knie-Beschwerde automatisch auf reines Gehen umgestellt.'
-      };
+    if (winter) {
+      const g = base.indexOf('GANZ');
+      if (g !== -1) base[g] = 'SKIPREP';
+      else {
+        const c = base.lastIndexOf('CONDITION');
+        if (c !== -1 && base.filter(function (t) { return t === 'CONDITION'; }).length > 1) base[c] = 'SKIPREP';
+      }
     }
-    const plans = {
-      1: { title: 'Intervall Woche 1', detail: '5 × (3 Min gehen + 1 Min leichtes Joggen) = 20 Min. Locker bleiben, Atmung kontrollieren.' },
-      2: { title: 'Intervall Woche 2', detail: '4 × (3 Min gehen + 2 Min joggen) = 20 Min. Jogg-Abschnitte etwas länger.' },
-      3: { title: 'Intervall Woche 3', detail: '3 × (2 Min gehen + 4 Min joggen) = 18 Min. Mehr Joggen als Gehen.' },
-      4: { title: 'Intervall Woche 4', detail: '20 Min durchgehend locker joggen. Wenn nötig kurze Gehpausen einlegen.' }
-    };
-    return plans[Math.min(Math.max(week, 1), 4)];
+    return base;
   }
+
+  const WARMUP_TEXT = 'Mobilisieren & aktivieren (5 Min): Hüftkreisen, Beinschwingen, Schulterkreisen, ' +
+    '10 Kniebeugen, 10 Ausfallschritte, Schulterblätter aktivieren. Puls hochbringen.';
+  const COOLDOWN_TEXT = 'Abwärmen (3–5 Min): locker ausgehen/ausschütteln, Oberschenkel, Hüftbeuger, ' +
+    'Brust und Nacken dehnen, ruhig atmen.';
 
   /* ----------------------------------------------------------------------
      State
      ---------------------------------------------------------------------- */
+  function defaultLocations() {
+    return [
+      { id: uid(), name: 'Wache', icon: '🏢',
+        equipment: ['langhantel','kurzhanteln','kettlebell','klimmzugstange','cardio','box','matte','band','gewichtsweste'] },
+      { id: uid(), name: 'Zuhause', icon: '🏠',
+        equipment: ['kurzhanteln','band','matte','springseil'] },
+      { id: uid(), name: 'Unterwegs', icon: '🎒', equipment: [] }
+    ];
+  }
+
   function defaultState() {
+    const locs = defaultLocations();
     return {
       version: 1,
       onboarded: false,
-      complaints: { ruecken: false, schulter: false, knie: false, handgelenk: false },
+      name: '',
+      locations: locs,
+      activeLocationId: locs[0].id,
+      complaints: { ruecken:false, schulter:false, knie:false, handgelenk:false, ellenbogen:false, sprunggelenk:false, nacken:false },
       complaintsText: '',
-      equipment: [],          // Standardgeräte (ids aus EQUIP_LABELS)
-      customEquipment: [],     // eigene Geräte (Freitext)
-      frequency: { strength: 3, endurance: 1 },
-      swaps: {},               // { plannedId: gewählteId }
-      currentSession: null,    // laufendes Training (Live-Zwischenspeicher)
-      history: [],             // absolvierte Sessions (neueste zuerst)
-      programStartIndex: 0     // Offset für Neustart des 4-Wochen-Programms
+      frequency: 4,          // Einheiten/Woche
+      sessionMinutes: 45,    // Ziel-Dauer je Einheit
+      theme: 'auto',         // auto | dark | light
+      swaps: {},
+      currentSession: null,
+      history: []
     };
   }
 
@@ -521,932 +320,828 @@
 
   function load() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(KEY);
       if (!raw) return defaultState();
-      const parsed = JSON.parse(raw);
-      return Object.assign(defaultState(), parsed, {
-        complaints: Object.assign(defaultState().complaints, parsed.complaints || {}),
-        frequency: Object.assign(defaultState().frequency, parsed.frequency || {})
-      });
-    } catch (e) {
-      return defaultState();
-    }
+      const p = JSON.parse(raw);
+      const d = defaultState();
+      const merged = Object.assign(d, p);
+      merged.complaints = Object.assign(d.complaints, p.complaints || {});
+      if (!merged.locations || !merged.locations.length) { merged.locations = d.locations; merged.activeLocationId = d.activeLocationId; }
+      if (!merged.activeLocationId || !merged.locations.some(function (l) { return l.id === merged.activeLocationId; })) {
+        merged.activeLocationId = merged.locations[0].id;
+      }
+      return merged;
+    } catch (e) { return defaultState(); }
   }
 
   function save() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch (e) {
-      alert('Speichern nicht möglich – ist der Speicher voll oder privater Modus aktiv?');
-    }
+    try { localStorage.setItem(KEY, JSON.stringify(state)); }
+    catch (e) { alert('Speichern nicht möglich – Speicher voll oder privater Modus?'); }
   }
 
   /* ----------------------------------------------------------------------
-     Adaptions-Logik (Kern)
+     Helpers
      ---------------------------------------------------------------------- */
-  function activeComplaints() {
-    return Object.keys(state.complaints).filter(function (k) { return state.complaints[k]; });
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function todayStr() { const d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
+  function formatDate(iso) { if (!iso) return ''; const p = iso.split('-'); return p.length === 3 ? p[2]+'.'+p[1]+'.'+p[0] : iso; }
+  function esc(v) {
+    return String(v == null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   }
+  function ytLink(name) { return 'https://www.youtube.com/results?search_query=' + encodeURIComponent(name + ' Übung Technik'); }
+  function isWinter() { return WINTER_MONTHS.indexOf(new Date().getMonth()) !== -1; }
+  function activeLocation() { return state.locations.find(function (l) { return l.id === state.activeLocationId; }) || state.locations[0]; }
+  function availableEquip() { const loc = activeLocation(); return (loc && loc.equipment) ? loc.equipment : []; }
+  function activeComplaints() { return Object.keys(state.complaints).filter(function (k) { return state.complaints[k]; }); }
 
-  // Gibt einen Konflikt-Grund als Text zurück oder null (=sicher).
+  /* ----------------------------------------------------------------------
+     Adaptions-Logik
+     ---------------------------------------------------------------------- */
   function conflictOf(ex) {
-    for (var i = 0; i < ex.equipment.length; i++) {
-      var eq = ex.equipment[i];
-      if (state.equipment.indexOf(eq) === -1) {
-        return 'Material fehlt (' + (EQUIP_LABELS[eq] || eq) + ')';
+    if (ex.equipment && ex.equipment.length) {
+      const avail = availableEquip();
+      const ok = ex.equipment.some(function (e) { return avail.indexOf(e) !== -1; });
+      if (!ok) {
+        const names = ex.equipment.map(function (e) { return EQUIP[e] ? EQUIP[e].label : e; });
+        return 'Material fehlt (' + names.join(' oder ') + ')';
       }
     }
-    var active = activeComplaints();
-    for (var j = 0; j < ex.loads.length; j++) {
-      var ld = ex.loads[j];
-      if (active.indexOf(ld) !== -1) {
-        return 'belastet ' + (COMPLAINT_LABELS[ld] || ld);
-      }
+    const comp = activeComplaints();
+    for (var i = 0; i < ex.loads.length; i++) {
+      if (comp.indexOf(ex.loads[i]) !== -1) return 'belastet ' + (COMPLAINTS[ex.loads[i]] ? COMPLAINTS[ex.loads[i]].label : ex.loads[i]);
     }
     return null;
   }
 
-  // Vollständige Ausweichkette ab einer Übung (Tiefensuche, dedupliziert).
   function chainFrom(startId) {
-    var chain = [];
-    var seen = {};
+    const chain = [], seen = {};
     (function walk(id) {
-      if (!id || seen[id] || !EXERCISES[id]) return;
-      seen[id] = true;
-      chain.push(id);
-      var alts = EXERCISES[id].alternatives || [];
-      for (var i = 0; i < alts.length; i++) walk(alts[i]);
+      if (!id || seen[id] || !EX[id]) return;
+      seen[id] = true; chain.push(id);
+      (EX[id].alternatives || []).forEach(walk);
     })(startId);
     return chain;
   }
 
-  /* Löst eine geplante Übung auf:
-     (a) manueller Tausch → Startpunkt, (b) Material geprüft, (c) Beschwerden geprüft.
-     Auch nach manuellem Tausch wird die Sicherheit geprüft. */
   function resolveExercise(plannedId) {
-    var swapTarget = state.swaps[plannedId];
-    var swapped = swapTarget && swapTarget !== plannedId && !!EXERCISES[swapTarget];
-    var startId = swapped ? swapTarget : plannedId;
-
-    var chain = chainFrom(startId);
-    var startConflict = conflictOf(EXERCISES[startId]);
+    const swapTarget = state.swaps[plannedId];
+    const swapped = swapTarget && swapTarget !== plannedId && !!EX[swapTarget];
+    const startId = swapped ? swapTarget : plannedId;
+    const chain = chainFrom(startId);
+    const startConflict = conflictOf(EX[startId]);
 
     for (var i = 0; i < chain.length; i++) {
-      var ex = EXERCISES[chain[i]];
+      const ex = EX[chain[i]];
       if (!conflictOf(ex)) {
         var reason = null;
         if (i > 0) reason = 'Ersetzt wegen: ' + startConflict;
         else if (swapped) reason = 'Manuell getauscht';
-        return {
-          exercise: ex, plannedId: plannedId, swapped: swapped,
-          replaced: i > 0, reason: reason, warning: null
-        };
+        return { exercise: ex, plannedId: plannedId, replaced: i > 0, swapped: swapped, reason: reason, warning: null };
       }
     }
-    // Keine sichere Alternative gefunden → Original mit Warnhinweis.
-    return {
-      exercise: EXERCISES[startId], plannedId: plannedId, swapped: swapped,
-      replaced: false,
+    return { exercise: EX[startId], plannedId: plannedId, replaced: false, swapped: swapped,
       reason: swapped ? 'Manuell getauscht' : null,
-      warning: 'Keine sichere Alternative (' + startConflict + '). Bewegungsradius reduzieren, langsam und kontrolliert – bei Schmerz abbrechen.'
-    };
+      warning: 'Keine sichere Alternative (' + startConflict + '). Bewegungsradius reduzieren, bei Schmerz abbrechen.' };
   }
 
   function swapExercise(plannedId) {
-    var options = chainFrom(plannedId); // enthält plannedId als erstes
-    var current = state.swaps[plannedId] || plannedId;
-    var idx = options.indexOf(current);
-    if (idx === -1) idx = 0;
-    var next = options[(idx + 1) % options.length];
-    state.swaps[plannedId] = next;
+    const options = chainFrom(plannedId);
+    const current = state.swaps[plannedId] || plannedId;
+    var idx = options.indexOf(current); if (idx === -1) idx = 0;
+    state.swaps[plannedId] = options[(idx + 1) % options.length];
     save();
   }
 
   /* ----------------------------------------------------------------------
-     Programm-Fortschritt
+     Dauer-Skalierung & Plan
      ---------------------------------------------------------------------- */
-  function strengthTotal() {
-    return state.history.filter(function (h) { return ORDER.indexOf(h.workoutId) !== -1; }).length;
+  function scaledExercises(type) {
+    const st = SESSIONS[type];
+    if (st.conditioning) return st.ex.slice(); // Core-Finisher; Hauptblock separat
+    const avail = Math.max(10, state.sessionMinutes - 10); // Warm/Cool reservieren
+    const chosen = []; var total = 0;
+    for (var i = 0; i < st.ex.length; i++) {
+      const m = EX[st.ex[i]].min || 5;
+      if (chosen.length < 3 || total + m <= avail) { chosen.push(st.ex[i]); total += m; }
+      else break;
+    }
+    return chosen;
   }
-  function strengthCount() {
-    return Math.max(0, strengthTotal() - (state.programStartIndex || 0));
+
+  function conditioningPlan() {
+    const minutes = state.sessionMinutes;
+    const avail = availableEquip();
+    const knee = state.complaints.knie;
+    const ankle = state.complaints.sprunggelenk;
+    if (avail.indexOf('cardio') !== -1) {
+      return { title: 'Cardio-Intervalle (Gerät)', detail: minutes + ' Min am Cardiogerät: 5 Min locker einrudern/-fahren, dann ' +
+        '6–8 × (1 Min zügig / 1 Min locker), 5 Min auslaufen.' };
+    }
+    if (avail.indexOf('rucksack') !== -1 && !knee) {
+      return { title: 'Rucking (Marsch mit Last)', detail: minutes + ' Min zügiger Marsch mit beladenem Rucksack, ' +
+        'wenn möglich mit Steigungen/Treppen (einsatznah). Aufrechte Haltung, Rumpf aktiv.' };
+    }
+    if (knee || ankle) {
+      return { title: 'Zügiges Gehen (gelenkschonend)', detail: minutes + ' Min zügiges Gehen in gleichmäßigem Tempo – ' +
+        'wegen Gelenkthema kein Laufen/Springen.' };
+    }
+    return { title: 'Lauf-Intervalle', detail: 'Gesamt ca. ' + minutes + ' Min: 5 Min locker einlaufen, dann ' +
+      '6 × (2 Min zügig / 1 Min gehen), 5 Min auslaufen. Tempo nach Gefühl.' };
   }
-  function totalGoal() {
-    return 4 * state.frequency.strength;
+
+  /* ----------------------------------------------------------------------
+     Fortschritt
+     ---------------------------------------------------------------------- */
+  function mondayOf(d) { const x = new Date(d); const off = (x.getDay() + 6) % 7; x.setDate(x.getDate() - off); x.setHours(0,0,0,0); return x; }
+  function dateObj(iso) { const p = iso.split('-'); return new Date(+p[0], +p[1]-1, +p[2]); }
+
+  function sessionsThisWeek() {
+    const mon = mondayOf(new Date());
+    return state.history.filter(function (h) { return dateObj(h.date) >= mon; }).length;
   }
-  function isCompleted() {
-    return strengthCount() >= totalGoal();
+  function weekStreak() {
+    var streak = 0;
+    var mon = mondayOf(new Date());
+    for (var w = 0; w < 104; w++) {
+      var start = new Date(mon); start.setDate(start.getDate() - w * 7);
+      var end = new Date(start); end.setDate(end.getDate() + 7);
+      var count = state.history.filter(function (h) { var d = dateObj(h.date); return d >= start && d < end; }).length;
+      if (count >= state.frequency) streak++;
+      else break;
+    }
+    return streak;
   }
-  function currentWeek() {
-    if (isCompleted()) return 4;
-    return Math.min(4, Math.floor(strengthCount() / state.frequency.strength) + 1);
-  }
-  function nextIndex() {
-    return strengthCount() % 3;
-  }
-  function nextWorkoutId() {
-    return ORDER[nextIndex()];
+  function nextType() {
+    const plan = weeklyPlan(state.frequency, isWinter());
+    return plan[state.history.length % plan.length];
   }
 
   /* ----------------------------------------------------------------------
      Session-Handling
      ---------------------------------------------------------------------- */
-  function newSession(id) {
-    var w = WORKOUTS[id];
-    var entries = {};
-    if (id !== 'D') {
-      w.exercises.forEach(function (pid) { entries[pid] = { done: false, weight: '', reps: '' }; });
-    } else {
-      entries.endurance = { done: false };
-    }
-    return { workoutId: id, startedAt: new Date().toISOString(), warmup: false, cooldown: false, entries: entries };
+  function newSession(type) {
+    const planned = scaledExercises(type);
+    const entries = {};
+    planned.forEach(function (pid) { entries[pid] = { done:false, weight:'', reps:'' }; });
+    const s = { type:type, startedAt:new Date().toISOString(), warmup:false, cooldown:false, planned:planned, entries:entries };
+    if (SESSIONS[type].conditioning) s.condDone = false;
+    return s;
   }
 
-  function finishWorkout() {
-    var s = state.currentSession;
-    if (!s) return;
-    var w = WORKOUTS[s.workoutId];
-    var exercises = [];
-    if (s.workoutId !== 'D') {
-      w.exercises.forEach(function (pid) {
-        var r = resolveExercise(pid);
-        var e = s.entries[pid] || {};
-        exercises.push({
-          id: r.exercise.id, name: r.exercise.name,
-          sets: r.exercise.sets, reps: r.exercise.reps,
-          weight: e.weight || '', doneReps: e.reps || '', done: !!e.done
-        });
+  function finishSession() {
+    const s = state.currentSession; if (!s) return;
+    const st = SESSIONS[s.type];
+    const exercises = [];
+    if (!st.conditioning) {
+      s.planned.forEach(function (pid) {
+        const r = resolveExercise(pid); const e = s.entries[pid] || {};
+        exercises.push({ id:r.exercise.id, name:r.exercise.name, sets:r.exercise.sets, reps:r.exercise.reps, weight:e.weight||'', doneReps:e.reps||'' });
       });
     }
-    var entry = {
-      id: uid(),
-      date: todayStr(),
-      workoutId: s.workoutId,
-      workoutName: w.name,
+    state.history.unshift({
+      id: uid(), date: todayStr(), type: s.type, typeName: st.name,
+      location: (activeLocation() || {}).name || '', minutes: state.sessionMinutes,
       exercises: exercises,
-      endurance: s.workoutId === 'D'
-        ? endurancePlan(currentWeek(), state.complaints.knie).detail
-        : null
-    };
-    state.history.unshift(entry);
-    state.currentSession = null;
-    state.swaps = {};
-    save();
-    location.hash = '#/';
-    render(); // falls hash schon '#/' war
+      conditioning: st.conditioning ? conditioningPlan().detail : null
+    });
+    state.currentSession = null; state.swaps = {};
+    save(); location.hash = '#/'; render();
   }
 
   /* ----------------------------------------------------------------------
-     Hilfsfunktionen
+     Theme
      ---------------------------------------------------------------------- */
-  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
-
-  function todayStr() {
-    var d = new Date();
-    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-  }
-  function pad(n) { return (n < 10 ? '0' : '') + n; }
-
-  function formatDate(iso) {
-    if (!iso) return '';
-    var p = iso.split('-');
-    if (p.length !== 3) return iso;
-    return p[2] + '.' + p[1] + '.' + p[0];
-  }
-
-  function esc(v) {
-    return String(v == null ? '' : v)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  }
-
-  function ytLink(name) {
-    return 'https://www.youtube.com/results?search_query=' +
-      encodeURIComponent(name + ' Übung richtige Technik');
+  function applyTheme() {
+    const root = document.documentElement;
+    if (state.theme === 'auto') root.removeAttribute('data-theme');
+    else root.setAttribute('data-theme', state.theme);
   }
 
   /* ----------------------------------------------------------------------
      Routing
      ---------------------------------------------------------------------- */
   function parseHash() {
-    var h = location.hash.replace(/^#\/?/, '');
-    var parts = h.split('/').filter(Boolean);
-    if (parts.length === 0) return { route: 'home' };
-    if (parts[0] === 'workout') return { route: 'workout', param: parts[1] };
+    const h = location.hash.replace(/^#\/?/, '');
+    const parts = h.split('/').filter(Boolean);
+    if (!parts.length) return { route: 'home' };
+    if (parts[0] === 'session') return { route: 'session', param: parts[1] };
     if (parts[0] === 'uebung') return { route: 'uebung', param: parts[1] };
-    if (parts[0] === 'verlauf' || parts[0] === 'material' || parts[0] === 'beschwerden') {
-      return { route: parts[0] };
-    }
+    if (['verlauf','orte','einstellungen'].indexOf(parts[0]) !== -1) return { route: parts[0] };
     return { route: 'home' };
   }
 
-  /* Transiente UI-Zustände (nicht persistiert) */
   var onboardStep = 1;
+  var editLocationId = null;
   var editingHistoryId = null;
 
   /* ----------------------------------------------------------------------
-     Rendering
+     Render
      ---------------------------------------------------------------------- */
   function render() {
-    var app = document.getElementById('app');
-
-    if (!state.onboarded) {
-      app.innerHTML = renderOnboarding();
-      window.scrollTo(0, 0);
-      return;
-    }
-
-    var r = parseHash();
-    var html, navKey;
-
+    const app = document.getElementById('app');
+    if (!state.onboarded) { app.innerHTML = renderOnboarding(); window.scrollTo(0,0); return; }
+    const r = parseHash();
+    var html, nav;
     switch (r.route) {
-      case 'workout': html = renderWorkout(r.param); navKey = null; break;
-      case 'verlauf': html = renderVerlauf(); navKey = 'verlauf'; break;
-      case 'material': html = renderMaterial(); navKey = 'material'; break;
-      case 'beschwerden': html = renderBeschwerden(); navKey = 'beschwerden'; break;
-      case 'uebung': html = renderUebung(r.param); navKey = 'home'; break;
-      default: html = renderDashboard(); navKey = 'home'; break;
+      case 'session': html = renderSession(r.param); nav = null; break;
+      case 'verlauf': html = renderVerlauf(); nav = 'verlauf'; break;
+      case 'orte': html = renderOrte(); nav = 'orte'; break;
+      case 'einstellungen': html = renderSettings(); nav = 'einstellungen'; break;
+      case 'uebung': html = renderUebung(r.param); nav = 'home'; break;
+      default: html = renderDashboard(); nav = 'home';
     }
-
-    app.innerHTML = html + (navKey !== null ? renderNav(navKey) : '');
+    app.innerHTML = html + (nav !== null ? renderNav(nav) : '');
     window.scrollTo(0, 0);
-
     if (r.route === 'verlauf') drawChart();
   }
 
   function renderNav(active) {
     function item(href, key, ico, label) {
-      return '<a href="' + href + '" class="' + (active === key ? 'active' : '') +
-        '" aria-label="' + label + '"' + (active === key ? ' aria-current="page"' : '') + '>' +
-        '<span class="ico" aria-hidden="true">' + ico + '</span>' + label + '</a>';
+      return '<a href="'+href+'" class="'+(active===key?'active':'')+'" aria-label="'+label+'"'+(active===key?' aria-current="page"':'')+'>' +
+        '<span class="ico" aria-hidden="true">'+ico+'</span>'+label+'</a>';
     }
     return '<nav class="bottom-nav" aria-label="Hauptnavigation"><div class="inner">' +
-      item('#/', 'home', '🏠', 'Übersicht') +
-      item('#/verlauf', 'verlauf', '📈', 'Verlauf') +
-      item('#/material', 'material', '🧰', 'Material') +
-      item('#/beschwerden', 'beschwerden', '⚙️', 'Beschwerden') +
+      item('#/','home','🎯','Heute') +
+      item('#/verlauf','verlauf','📈','Verlauf') +
+      item('#/orte','orte','📍','Orte') +
+      item('#/einstellungen','einstellungen','⚙️','Einstellung') +
       '</div></nav>';
   }
 
   /* ---------- Onboarding ---------- */
   function renderOnboarding() {
-    var dots = '<div class="dots" aria-hidden="true">' +
-      [1, 2, 3, 4].map(function (n) {
-        return '<span class="dot ' + (n === onboardStep ? 'active' : '') + '"></span>';
-      }).join('') + '</div>';
+    const total = 5;
+    var dotsArr = [];
+    for (var i = 0; i < total; i++) dotsArr.push('<span class="dot '+(i+1 === onboardStep ? 'active':'')+'"></span>');
+    const dots = '<div class="dots" aria-hidden="true">' + dotsArr.join('') + '</div>';
 
     var body = '';
     if (onboardStep === 1) {
-      body =
-        '<div class="hero">👟</div>' +
-        '<h2>Willkommen zurück!</h2>' +
-        '<p>Schön, dass du wieder loslegst. Diese App begleitet dich in <strong>4 Wochen</strong> ' +
-        'zurück in die Bewegung – zuhause, in deinem Tempo.</p>' +
-        '<p class="muted small">Der Plan ist bewusst gelenkschonend aufgebaut. In den nächsten Schritten ' +
-        'passen wir ihn an dich an. Du kannst später alles jederzeit ändern.</p>' +
-        '<div class="btn-row"><button class="btn btn--lg" data-action="onb-next">Los geht’s</button></div>';
+      body = '<div class="hero-ex">🎯</div>' +
+        '<h2>Willkommen bei EinsatzFit</h2>' +
+        '<p>Dein Training für den Dienst – ausgelegt auf <strong>Polizei &amp; Feuerwehr</strong> ' +
+        '(Kraft, Work Capacity, Tragen &amp; Greifen, Kondition), mit <strong>Ski-Vorbereitung</strong> im Winter.</p>' +
+        '<p class="muted small">In den nächsten Schritten richten wir deine Orte, dein Material, Beschwerden ' +
+        'und deine Trainingsmenge ein. Alles später jederzeit änderbar.</p>' +
+        '<div class="btn-row"><button class="btn btn--lg" data-action="onb-next">Einrichten starten</button></div>';
     } else if (onboardStep === 2) {
-      body =
-        '<h2>Hast du aktuell Beschwerden?</h2>' +
-        '<p class="muted small">Mehrfachauswahl möglich. Wir bauen betroffene Übungen automatisch ' +
-        'auf sichere Alternativen um. Nichts ist vorausgewählt.</p>' +
-        complaintTogglesHTML() +
-        '<div class="field"><label for="ob-ctext">Sonstige Beschwerden (optional)</label>' +
-        '<textarea id="ob-ctext" data-field="complaintsText" placeholder="z. B. Nacken verspannt">' +
-        esc(state.complaintsText) + '</textarea></div>' +
-        navButtons(true);
+      body = '<h2>Deine Orte &amp; dein Material</h2>' +
+        '<p class="muted small">Du trainierst an verschiedenen Orten mit unterschiedlichem Material. ' +
+        'Richte sie hier ein – vor jeder Einheit wählst du einfach, wo du bist.</p>' +
+        locationsEditorHTML() +
+        '<div class="btn-row"><button class="btn btn--ghost" data-action="onb-back">Zurück</button>' +
+        '<button class="btn" data-action="onb-next">Weiter</button></div>';
     } else if (onboardStep === 3) {
-      body =
-        '<h2>Welches Material hast du?</h2>' +
-        '<p class="muted small">Mehrfachauswahl möglich. Übungen, für die dir das Gerät fehlt, ' +
-        'werden automatisch ersetzt.</p>' +
-        equipTogglesHTML() +
-        customEquipHTML('ob') +
-        navButtons(true);
+      body = '<h2>Aktuelle Beschwerden?</h2>' +
+        '<p class="muted small">Mehrfachauswahl. Betroffene Übungen werden automatisch durch sichere ' +
+        'Alternativen ersetzt. Nichts ist vorausgewählt – du kannst das jeden Tag neu setzen.</p>' +
+        complaintTogglesHTML() +
+        '<div class="field"><label for="ob-ct">Sonstige Beschwerden (optional)</label>' +
+        '<textarea id="ob-ct" data-field="complaintsText" placeholder="z. B. Nacken verspannt">'+esc(state.complaintsText)+'</textarea></div>' +
+        '<div class="btn-row"><button class="btn btn--ghost" data-action="onb-back">Zurück</button>' +
+        '<button class="btn" data-action="onb-next">Weiter</button></div>';
+    } else if (onboardStep === 4) {
+      body = '<h2>Trainingsmenge</h2>' +
+        '<p class="muted small">Wie viel passt in deinen Dienst-/Alltag? Jederzeit anpassbar – ' +
+        'wenn du mal weniger Zeit hast, stell die Dauer einfach runter, der Plan skaliert mit.</p>' +
+        freqDurationHTML() +
+        '<div class="btn-row"><button class="btn btn--ghost" data-action="onb-back">Zurück</button>' +
+        '<button class="btn" data-action="onb-next">Weiter</button></div>';
     } else {
-      body =
-        '<h2>Deine Trainingsfrequenz</h2>' +
-        '<p class="muted small">Wie oft möchtest du pro Woche trainieren? Später jederzeit änderbar.</p>' +
-        frequencyFieldsHTML() +
-        '<div class="btn-row">' +
-        '<button class="btn btn--ghost" data-action="onb-back">Zurück</button>' +
-        '<button class="btn" data-action="onb-finish">Fertig – zum Dashboard</button></div>';
+      body = '<div class="hero-ex">✅</div>' +
+        '<h2>Alles bereit</h2>' +
+        '<p>Dein Plan steht: <strong>'+state.frequency+' Einheiten/Woche</strong> à <strong>'+state.sessionMinutes+' Min</strong>, ' +
+        'Schwerpunkt Polizei/Feuerwehr'+(isWinter()?', aktuell mit Ski-Prep (Winter)':'')+'.</p>' +
+        '<p class="muted small">Auf dem Dashboard wählst du vor jeder Einheit deinen Ort und bestätigst dein ' +
+        'Tagesbefinden. Los geht’s.</p>' +
+        '<div class="btn-row"><button class="btn btn--ghost" data-action="onb-back">Zurück</button>' +
+        '<button class="btn btn--lg" data-action="onb-finish">Zum Dashboard</button></div>';
     }
 
-    return '<div class="view view--noflow">' +
-      '<p class="eyebrow">Einrichtung · Schritt ' + onboardStep + ' von 4</p>' +
-      dots +
-      '<div class="card">' + body + '</div>' +
-      '</div>';
-  }
-
-  function navButtons(withBack) {
-    return '<div class="btn-row">' +
-      (withBack ? '<button class="btn btn--ghost" data-action="onb-back">Zurück</button>' : '') +
-      '<button class="btn" data-action="onb-next">Weiter</button></div>';
+    return '<div class="view view--full">' +
+      '<p class="eyebrow">Einrichtung · Schritt '+onboardStep+' / '+total+'</p>' + dots +
+      '<div class="card">'+body+'</div></div>';
   }
 
   function complaintTogglesHTML() {
-    return Object.keys(COMPLAINT_LABELS).map(function (key) {
-      var on = !!state.complaints[key];
-      return toggleHTML('toggle-complaint', key, COMPLAINT_LABELS[key], '', on);
+    return Object.keys(COMPLAINTS).map(function (k) {
+      const on = !!state.complaints[k];
+      return '<div class="toggle" role="checkbox" tabindex="0" aria-checked="'+(on?'true':'false')+'" data-action="toggle-complaint" data-key="'+k+'">' +
+        '<span class="ico" aria-hidden="true">'+COMPLAINTS[k].icon+'</span>' +
+        '<span class="label">'+COMPLAINTS[k].label+'</span><span class="box" aria-hidden="true"></span></div>';
     }).join('');
   }
 
-  function equipTogglesHTML() {
-    return Object.keys(EQUIP_LABELS).map(function (key) {
-      var on = state.equipment.indexOf(key) !== -1;
-      return toggleHTML('toggle-equip', key, EQUIP_LABELS[key], '', on);
-    }).join('');
-  }
-
-  function toggleHTML(action, key, label, sub, on) {
-    return '<div class="toggle" role="checkbox" tabindex="0" aria-checked="' + (on ? 'true' : 'false') +
-      '" data-action="' + action + '" data-key="' + esc(key) + '">' +
-      '<span class="box" aria-hidden="true"></span>' +
-      '<span class="label">' + esc(label) +
-      (sub ? '<span class="sub">' + esc(sub) + '</span>' : '') + '</span></div>';
-  }
-
-  function customEquipHTML(prefix) {
-    var list = state.customEquipment.map(function (name, i) {
-      return '<div class="toggle" aria-checked="true" role="checkbox">' +
-        '<span class="box" aria-hidden="true"></span>' +
-        '<span class="label">' + esc(name) + '</span>' +
-        '<button class="remove-x" data-action="remove-equip" data-index="' + i +
-        '" aria-label="' + esc(name) + ' entfernen">✕</button></div>';
-    }).join('');
-    return list +
-      '<div class="inline-fields" style="margin-top:6px">' +
-      '<div class="field" style="flex:1"><input type="text" id="newEquipInput" ' +
-      'placeholder="Eigenes Gerät hinzufügen"></div>' +
-      '<button class="btn btn--soft" data-action="add-equip" style="flex:0 0 auto">Hinzufügen</button></div>';
-  }
-
-  function frequencyFieldsHTML() {
-    function opts(from, to, val) {
-      var o = '';
-      for (var i = from; i <= to; i++) {
-        o += '<option value="' + i + '"' + (i === val ? ' selected' : '') + '>' + i + '</option>';
+  function locationsEditorHTML() {
+    return state.locations.map(function (loc) {
+      const open = editLocationId === loc.id;
+      const count = loc.equipment.length;
+      const head = '<div class="row-between" style="cursor:pointer" data-action="toggle-loc-edit" data-id="'+loc.id+'">' +
+        '<div class="row"><span style="font-size:1.4rem">'+esc(loc.icon||'📍')+'</span>' +
+        '<div><div style="font-weight:700">'+esc(loc.name)+'</div>' +
+        '<div class="small muted tnum">'+count+' Geräte'+(count===0?' · nur Eigengewicht':'')+'</div></div></div>' +
+        '<span class="muted">'+(open?'▲':'▼')+'</span></div>';
+      var inner = '';
+      if (open) {
+        inner = '<hr class="sep">' +
+          '<div class="field"><label>Name</label>' +
+          '<input type="text" value="'+esc(loc.name)+'" data-field="loc-name" data-id="'+loc.id+'"></div>' +
+          '<div style="margin-top:12px" class="small muted">Vorhandenes Material:</div>' +
+          '<div class="chips" style="margin-top:8px">' +
+          Object.keys(EQUIP).map(function (eq) {
+            const on = loc.equipment.indexOf(eq) !== -1;
+            return '<button class="chip" aria-pressed="'+(on?'true':'false')+'" data-action="toggle-loc-equip" data-id="'+loc.id+'" data-eq="'+eq+'">' +
+              EQUIP[eq].icon+' '+esc(EQUIP[eq].label)+'</button>';
+          }).join('') + '</div>' +
+          '<div class="btn-row" style="margin-top:14px">' +
+          '<button class="btn btn--crit btn--sm" data-action="remove-loc" data-id="'+loc.id+'">Ort löschen</button></div>';
       }
-      return o;
-    }
-    return '<div class="field"><label for="freqS">Krafteinheiten pro Woche</label>' +
-      '<select id="freqS" data-field="freqStrength">' + opts(2, 5, state.frequency.strength) + '</select></div>' +
-      '<div class="field"><label for="freqE">Ausdauereinheiten pro Woche</label>' +
-      '<select id="freqE" data-field="freqEndurance">' + opts(0, 3, state.frequency.endurance) + '</select></div>';
+      return '<div class="card card--flat">'+head+inner+'</div>';
+    }).join('') +
+    '<div class="inline-fields" style="margin-top:4px">' +
+    '<div class="field" style="flex:1"><input type="text" id="newLocInput" placeholder="Neuer Ort (z. B. Fitnessstudio)"></div>' +
+    '<button class="btn btn--soft" data-action="add-loc" style="flex:0 0 auto">+ Ort</button></div>';
+  }
+
+  function freqDurationHTML() {
+    return '<div class="card card--flat"><label>Einheiten pro Woche</label>' +
+      '<div class="stepper">' +
+      '<button data-action="freq-dec" aria-label="weniger">–</button>' +
+      '<div class="val">'+state.frequency+'<small>/ WOCHE</small></div>' +
+      '<button data-action="freq-inc" aria-label="mehr">+</button></div></div>' +
+      '<div class="card card--flat"><label>Dauer pro Einheit</label>' +
+      '<div class="stepper">' +
+      '<button data-action="dur-dec" aria-label="kürzer">–</button>' +
+      '<div class="val">'+state.sessionMinutes+'<small>MINUTEN</small></div>' +
+      '<button data-action="dur-inc" aria-label="länger">+</button></div>' +
+      '<p class="small muted" style="margin:10px 0 0">Der Plan wählt automatisch so viele Übungen, wie in die Zeit passen.</p></div>';
   }
 
   /* ---------- Dashboard ---------- */
   function renderDashboard() {
-    var week = currentWeek();
-    var goal = totalGoal();
-    var done = Math.min(strengthCount(), goal);
-    var pct = goal > 0 ? Math.round((done / goal) * 100) : 0;
+    const type = nextType();
+    const st = SESSIONS[type];
+    const goal = state.frequency;
+    const thisWeek = sessionsThisWeek();
+    const streak = weekStreak();
+    const loc = activeLocation();
 
-    var completedBlock = '';
-    if (isCompleted()) {
-      completedBlock =
-        '<div class="card card--green stack">' +
-        '<div class="hero" style="background:rgba(255,255,255,.15);color:#fff">🎉</div>' +
-        '<h2 style="color:#fff">Programm geschafft!</h2>' +
-        '<p>Du hast alle 4 Wochen abgeschlossen – stark! Du kannst weitertrainieren ' +
-        'oder ein frisches Programm starten.</p>' +
-        '<button class="btn btn--soft" data-action="restart">Neues Programm starten</button></div>';
+    const locSwitch = '<div class="loc-switch">' +
+      state.locations.map(function (l) {
+        const on = l.id === state.activeLocationId;
+        const g = l.equipment.length ? l.equipment.length + ' Geräte' : 'Eigengewicht';
+        return '<button class="loc-chip" aria-pressed="'+(on?'true':'false')+'" data-action="set-loc" data-id="'+l.id+'">' +
+          '<span class="n">'+esc(l.icon||'📍')+' '+esc(l.name)+'</span><span class="g">'+g+'</span></button>';
+      }).join('') +
+      '<a class="loc-chip" href="#/orte" style="justify-content:center;align-items:center"><span class="n">＋</span><span class="g">Ort</span></a>' +
+      '</div>';
+
+    const compChips = '<div class="chips">' +
+      Object.keys(COMPLAINTS).map(function (k) {
+        const on = !!state.complaints[k];
+        return '<button class="chip" aria-pressed="'+(on?'true':'false')+'" data-action="toggle-complaint" data-key="'+k+'">' +
+          COMPLAINTS[k].icon+' '+COMPLAINTS[k].label+'</button>';
+      }).join('') + '</div>';
+
+    const ac = activeComplaints();
+    const readinessPill = ac.length
+      ? '<span class="pill pill--warn">'+ac.length+' Beschwerde'+(ac.length>1?'n':'')+' aktiv</span>'
+      : '<span class="pill pill--good">Voll einsatzbereit</span>';
+
+    const resume = state.currentSession;
+    const hero = '<div class="card card--accent hero-session">' +
+      '<div class="kicker"><span class="eyebrow">Heute empfohlen</span>'+
+        (isWinter() && st.ski ? '<span class="pill pill--steel">❄️ Winter</span>' : '')+'</div>' +
+      '<div class="row" style="gap:10px"><span style="font-size:1.8rem">'+st.icon+'</span>' +
+      '<h2 style="margin:0">'+esc(st.name)+'</h2></div>' +
+      '<div class="meta">' +
+      '<div class="m"><b class="tnum">'+state.sessionMinutes+'′</b><span>Dauer</span></div>' +
+      '<div class="m"><b>'+esc(loc.icon||'📍')+' '+esc(loc.name)+'</b><span>Ort</span></div>' +
+      '<div class="m"><b class="tnum">'+scaledExercises(type).length+(st.conditioning?'+':'')+'</b><span>Übungen</span></div>' +
+      '</div>' +
+      '<div class="tags" style="margin-bottom:14px">'+st.tags.map(function (t){return '<span class="tag">'+esc(t)+'</span>';}).join('')+'</div>' +
+      (resume ? '<p class="small" style="margin:0 0 10px"><span class="pill pill--orange">Laufende Einheit</span> '+esc(SESSIONS[resume.type].name)+'</p>' : '') +
+      '<a class="btn btn--lg btn--block" href="#/session/'+type+'">Einheit starten  ▸</a></div>';
+
+    const stats = '<div class="statgrid">' +
+      '<div class="stat"><b class="tnum">'+thisWeek+'<span class="unit">/'+goal+'</span></b><span>Diese Woche</span></div>' +
+      '<div class="stat"><b class="tnum">'+streak+'</b><span>Wochen-Serie</span></div>' +
+      '<div class="stat"><b class="tnum">'+state.history.length+'</b><span>Einheiten</span></div>' +
+      '</div>';
+
+    const mon = mondayOf(new Date());
+    const dayNames = ['Mo','Di','Mi','Do','Fr','Sa','So'];
+    const todayIso = todayStr();
+    var weekrow = '<div class="weekrow">';
+    for (var i = 0; i < 7; i++) {
+      var d = new Date(mon); d.setDate(d.getDate() + i);
+      var iso = d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+      var done = state.history.some(function (h) { return h.date === iso; });
+      var cls = 'weekdot' + (done ? ' done' : '') + (iso === todayIso ? ' today' : '');
+      weekrow += '<div class="'+cls+'"><span>'+dayNames[i]+'</span><b>'+(done?'✓':'·')+'</b></div>';
+    }
+    weekrow += '</div>';
+
+    const plan = weeklyPlan(state.frequency, isWinter());
+    const startIdx = state.history.length % plan.length;
+    var planList = '';
+    for (var p = 0; p < plan.length; p++) {
+      var t = plan[(startIdx + p) % plan.length];
+      var s = SESSIONS[t];
+      planList += '<a class="row-between" href="#/session/'+t+'" style="text-decoration:none;color:inherit;padding:11px 2px;border-bottom:1px solid var(--line-soft)">' +
+        '<div class="row"><span style="font-size:1.3rem">'+s.icon+'</span>' +
+        '<div><div style="font-weight:650">'+esc(s.short)+(p===0?' <span class="pill pill--orange" style="margin-left:4px">Nächste</span>':'')+'</div>' +
+        '<div class="small muted">'+esc(s.name)+'</div></div></div>' +
+        '<span class="btn btn--soft btn--sm">Start</span></a>';
     }
 
-    var nextId = nextWorkoutId();
-    var nextCard =
-      '<div class="card card--green stack">' +
-      '<p class="eyebrow" style="color:#cfeee0">Nächstes Training</p>' +
-      '<h2 style="color:#fff;margin:0">' + esc(WORKOUTS[nextId].name) + '</h2>' +
-      (state.currentSession
-        ? '<p class="small">Du hast ein Training im Gange (' +
-          esc(WORKOUTS[state.currentSession.workoutId].name) + ').</p>'
-        : '') +
-      '<a class="btn btn--soft btn--lg" href="#/workout/' + nextId + '">Training starten ▸</a></div>';
-
-    // Fortschrittsbalken
-    var progressCard =
-      '<div class="card stack">' +
-      '<div class="row-between"><h3 style="margin:0">Fortschritt · 4 Wochen</h3>' +
-      '<span class="small muted">' + done + ' / ' + goal + ' Einheiten</span></div>' +
-      '<div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="' + goal +
-      '" aria-valuenow="' + done + '" aria-label="Programmfortschritt: ' + done + ' von ' + goal +
-      ' Krafteinheiten (' + pct + ' Prozent)">' +
-      '<div class="fill" style="width:' + pct + '%"></div></div></div>';
-
-    // Deine Woche
-    var idx = nextIndex();
-    var slots = '';
-    for (var i = 0; i < state.frequency.strength; i++) {
-      var wid = ORDER[(idx + i) % 3];
-      slots += weekSlot(wid, i === 0);
-    }
-    for (var e = 0; e < state.frequency.endurance; e++) {
-      slots += weekSlot('D', false);
-    }
-    var weekCard =
-      '<div class="card"><h3>Deine Woche</h3>' +
-      '<p class="small muted" style="margin-bottom:6px">' + state.frequency.strength +
-      '× Kraft (A→B→C rotierend)' +
-      (state.frequency.endurance > 0 ? ' · ' + state.frequency.endurance + '× Ausdauer' : '') +
-      '</p>' + slots + '</div>';
-
-    // Beschwerden-Hinweis
-    var complaintHint = '';
-    var ac = activeComplaints();
-    if (ac.length || state.complaintsText.trim()) {
-      var parts = ac.map(function (k) { return COMPLAINT_LABELS[k]; });
-      if (state.complaintsText.trim()) parts.push(esc(state.complaintsText.trim()));
-      complaintHint =
-        '<div class="notice notice--warn" style="margin-bottom:14px">🩹 Aktive Beschwerden: ' +
-        parts.join(', ') + '. Übungen werden entsprechend angepasst.</div>';
-    }
-
-    // Aufwärm- & Sicherheitshinweise
-    var safetyCard =
-      '<div class="card card--flat stack">' +
-      '<h3>Immer dabei</h3>' +
-      '<p class="small"><strong>Aufwärmen:</strong> ' + WARMUP_TEXT + '</p>' +
-      '<hr class="sep">' +
-      '<p class="small"><strong>Sicherheit:</strong> Sauber vor schwer – Technik geht vor Gewicht. ' +
-      'Bei echtem Schmerz (nicht nur Muskelkater) abbrechen. Ruhig weiteratmen.</p></div>';
+    const complaintNote = state.complaintsText.trim()
+      ? '<div class="notice notice--warn" style="margin-top:12px">🩹 Dein Hinweis: '+esc(state.complaintsText.trim())+'</div>' : '';
 
     return '<div class="view">' +
-      '<div class="topbar"><div><p class="eyebrow">Woche ' + week + ' von 4</p>' +
-      '<h1>Fit wieder starten</h1></div></div>' +
-      complaintHint +
-      (isCompleted() ? completedBlock : nextCard) +
-      progressCard +
-      weekCard +
-      safetyCard +
+      '<div class="topbar"><div class="grow"><p class="eyebrow">'+(isWinter()?'Wintersaison · Ski-Prep aktiv':'Einsatzbereitschaft')+'</p>' +
+      '<h1>'+(state.name ? 'Servus '+esc(state.name) : 'Dein Training')+'</h1></div>' +
+      '<button class="iconbtn" data-action="cycle-theme" aria-label="Design wechseln">'+(state.theme==='light'?'☀️':state.theme==='dark'?'🌙':'◐')+'</button></div>' +
+
+      '<div class="card card--tight"><div class="row-between" style="margin-bottom:10px"><span class="eyebrow" style="margin:0">Wo bist du?</span>'+
+        '<span class="small muted">Material passt sich an</span></div>'+locSwitch+'</div>' +
+
+      hero +
+      stats +
+
+      '<div class="card"><div class="row-between" style="margin-bottom:10px"><h3 style="margin:0">Tagesbefinden</h3>'+readinessPill+'</div>' +
+      '<p class="small muted" style="margin:0 0 10px">Tippe an, was heute zwickt – der Plan baut betroffene Übungen sicher um.</p>' +
+      compChips + complaintNote + '</div>' +
+
+      '<div class="card"><div class="row-between" style="margin-bottom:8px"><h3 style="margin:0">Diese Woche</h3>' +
+      '<span class="small muted tnum">'+thisWeek+' / '+goal+'</span></div>'+weekrow+'</div>' +
+
+      '<div class="card"><h3>Dein Wochenplan</h3>'+planList+'</div>' +
+
+      '<div class="card card--flat stack">' +
+      '<h3>Immer dabei</h3>' +
+      '<p class="small"><strong>Aufwärmen:</strong> '+WARMUP_TEXT+'</p><hr class="sep">' +
+      '<p class="small"><strong>Sicherheit:</strong> Technik vor Gewicht. Bei echtem Schmerz (nicht Muskelkater) abbrechen. ' +
+      'Nach Dienst/Nachtschicht Intensität anpassen.</p></div>' +
+
       '</div>';
   }
 
-  function weekSlot(wid, highlight) {
-    var w = WORKOUTS[wid];
-    var badge = wid;
-    return '<div class="slot">' +
-      '<span class="badge">' + badge + '</span>' +
-      '<span class="grow"><span class="name">' + esc(w.name.replace(/^Workout . · /, '')) +
-      '</span><br><span class="small muted">' +
-      (wid === 'D' ? 'Ausdauer' : 'Krafttraining') + '</span></span>' +
-      '<a class="btn btn--soft btn--sm" href="#/workout/' + wid + '">Start</a>' +
-      '</div>';
-  }
+  /* ---------- Session ---------- */
+  function renderSession(type) {
+    const st = SESSIONS[type];
+    if (!st) return renderNotFound(type);
+    if (!state.currentSession || state.currentSession.type !== type) { state.currentSession = newSession(type); save(); }
+    const s = state.currentSession;
+    const loc = activeLocation();
 
-  /* ---------- Workout-Session ---------- */
-  function renderWorkout(id) {
-    var w = WORKOUTS[id];
-    if (!w) return renderNotFound(id);
+    const header = '<div class="topbar">' +
+      '<a class="iconbtn" href="#/" aria-label="Zurück">‹</a>' +
+      '<div class="grow"><p class="eyebrow">'+esc(st.tags.join(' · '))+'</p><h1 style="font-size:1.3rem">'+esc(st.name)+'</h1></div></div>';
 
-    // Session sicherstellen (Live-Zwischenspeicher)
-    if (!state.currentSession || state.currentSession.workoutId !== id) {
-      state.currentSession = newSession(id);
-      save();
-    }
-    var s = state.currentSession;
+    const locBar = '<div class="card card--tight"><div class="row-between"><span class="small muted">Ort / Material</span>' +
+      '<span class="small tnum">'+esc(loc.icon||'📍')+' '+esc(loc.name)+' · '+(loc.equipment.length||'Eigengewicht')+(loc.equipment.length?' Geräte':'')+'</span></div>' +
+      '<div class="loc-switch" style="margin-top:10px">' +
+      state.locations.map(function (l) {
+        const on = l.id === state.activeLocationId;
+        return '<button class="loc-chip" aria-pressed="'+(on?'true':'false')+'" data-action="set-loc" data-id="'+l.id+'">' +
+          '<span class="n">'+esc(l.icon||'📍')+' '+esc(l.name)+'</span><span class="g">'+(l.equipment.length?l.equipment.length+' Geräte':'Eigengewicht')+'</span></button>';
+      }).join('') + '</div></div>';
 
-    var header =
-      '<div class="topbar">' +
-      '<a class="iconbtn" href="#/" aria-label="Zurück zur Übersicht">‹</a>' +
-      '<div><p class="eyebrow">Training · Woche ' + currentWeek() + '</p>' +
-      '<h1>' + esc(w.name) + '</h1></div></div>';
-
-    var warmup =
-      stepCardHTML('Aufwärmen', '5 Min', WARMUP_TEXT, s.warmup, 'toggle-warmup');
+    const warm = stepCard('Aufwärmen', '≈5 Min', WARMUP_TEXT, s.warmup, 'toggle-warmup');
 
     var middle = '';
-    if (id === 'D') {
-      var plan = endurancePlan(currentWeek(), state.complaints.knie);
-      var enDone = s.entries.endurance.done;
-      middle =
-        '<div class="exercise ' + (enDone ? 'done' : '') + '">' +
-        '<div class="head"><div class="grow"><h3>' + esc(plan.title) + '</h3>' +
-        '<div class="scheme">Ausdauer</div></div>' +
-        checkHTML(enDone, 'Ausdauer erledigt', 'toggle-endurance', '') + '</div>' +
-        '<p class="small" style="margin-top:8px">' + esc(plan.detail) + '</p>' +
-        (state.complaints.knie
-          ? '<div class="notice notice--info">Wegen Knie-Beschwerde: reines Gehen statt Joggen.</div>'
-          : '') +
-        '</div>';
+    if (st.conditioning) {
+      const plan = conditioningPlan();
+      middle = '<div class="exercise '+(s.condDone?'done':'')+'">' +
+        '<div class="head"><div class="grow"><div class="num">Hauptteil</div><h3>'+esc(plan.title)+'</h3>' +
+        '<div class="scheme">'+state.sessionMinutes+' Min</div></div>' +
+        checkEl(s.condDone, 'Kondition erledigt', 'toggle-cond', '') + '</div>' +
+        '<p class="small" style="margin-top:10px">'+esc(plan.detail)+'</p></div>';
+      s.planned.forEach(function (pid, idx) {
+        middle += exerciseCard(resolveExercise(pid), s.entries[pid], 'Finisher ' + (idx+1), false);
+      });
     } else {
-      middle = w.exercises.map(function (pid) {
-        return exerciseCardHTML(resolveExercise(pid), s.entries[pid]);
+      middle = s.planned.map(function (pid, idx) {
+        return exerciseCard(resolveExercise(pid), s.entries[pid], 'Übung ' + (idx+1) + ' / ' + s.planned.length, true);
       }).join('');
     }
 
-    var cooldown =
-      stepCardHTML('Abwärmen', '3–5 Min', COOLDOWN_TEXT, s.cooldown, 'toggle-cooldown');
+    const cool = stepCard('Abwärmen', '3–5 Min', COOLDOWN_TEXT, s.cooldown, 'toggle-cooldown');
 
-    var complaintHint = '';
-    if (state.complaintsText.trim()) {
-      complaintHint = '<div class="notice notice--warn" style="margin-bottom:12px">🩹 Dein Hinweis: ' +
-        esc(state.complaintsText.trim()) + ' – achte besonders darauf.</div>';
-    }
+    const note = state.complaintsText.trim()
+      ? '<div class="notice notice--warn" style="margin:0 0 12px">🩹 Dein Hinweis: '+esc(state.complaintsText.trim())+' – achte besonders darauf.</div>' : '';
 
-    var finish =
-      '<button class="btn btn--lg btn--block" data-action="finish" style="margin-top:6px">' +
-      'Training abschließen ✓</button>' +
+    const finish = '<button class="btn btn--lg btn--block" data-action="finish">Einheit abschließen ✓</button>' +
       '<p class="small muted center" style="margin-top:8px">Alle Eingaben werden automatisch gespeichert.</p>';
 
-    return '<div class="view view--noflow">' +
-      header + complaintHint + warmup + middle + cooldown + finish +
-      '</div>';
+    return '<div class="view view--full">'+header+locBar+note+warm+middle+cool+finish+'</div>';
   }
 
-  function stepCardHTML(title, scheme, text, done, action) {
-    return '<div class="exercise ' + (done ? 'done' : '') + '">' +
-      '<div class="head"><div class="grow"><h3>' + esc(title) + '</h3>' +
-      '<div class="scheme">' + esc(scheme) + '</div></div>' +
-      checkHTML(done, title + ' erledigt', action, '') + '</div>' +
-      '<p class="small muted" style="margin-top:8px">' + esc(text) + '</p></div>';
+  function stepCard(title, scheme, text, done, action) {
+    return '<div class="exercise '+(done?'done':'')+'">' +
+      '<div class="head"><div class="grow"><h3>'+esc(title)+'</h3><div class="scheme">'+esc(scheme)+'</div></div>' +
+      checkEl(done, title+' erledigt', action, '')+'</div>' +
+      '<p class="small muted" style="margin-top:10px">'+esc(text)+'</p></div>';
+  }
+  function checkEl(done, label, action, id) {
+    return '<div class="check" role="checkbox" tabindex="0" aria-checked="'+(done?'true':'false')+'" aria-label="'+esc(label)+'" data-action="'+action+'"'+(id?' data-id="'+esc(id)+'"':'')+'></div>';
   }
 
-  function checkHTML(done, label, action, dataId) {
-    return '<div class="check" role="checkbox" tabindex="0" aria-checked="' + (done ? 'true' : 'false') +
-      '" aria-label="' + esc(label) + '" data-action="' + action + '"' +
-      (dataId ? ' data-id="' + esc(dataId) + '"' : '') + '></div>';
-  }
-
-  function exerciseCardHTML(res, entry) {
-    var ex = res.exercise;
-    entry = entry || { done: false, weight: '', reps: '' };
+  function exerciseCard(res, entry, num, withIO) {
+    const ex = res.exercise;
+    entry = entry || { done:false, weight:'', reps:'' };
     var notice = '';
-    if (res.warning) notice = '<div class="notice notice--warn">⚠️ ' + esc(res.warning) + '</div>';
-    else if (res.reason) notice = '<div class="notice notice--info">↺ ' + esc(res.reason) + '</div>';
+    if (res.warning) notice = '<div class="notice notice--warn">⚠️ '+esc(res.warning)+'</div>';
+    else if (res.reason) notice = '<div class="notice notice--swap">↺ '+esc(res.reason)+'</div>';
 
-    return '<div class="exercise ' + (entry.done ? 'done' : '') + '">' +
-      '<div class="head"><div class="grow"><h3>' + esc(ex.name) + '</h3>' +
-      '<div class="scheme">' + ex.sets + ' Sätze × ' + esc(ex.reps) + '</div></div>' +
-      checkHTML(entry.done, ex.name + ' als erledigt markieren', 'toggle-exercise', res.plannedId) +
-      '</div>' +
-      notice +
-      '<div class="io-fields">' +
-      '<div class="field"><label for="w-' + res.plannedId + '">Gewicht (kg)</label>' +
-      '<input id="w-' + res.plannedId + '" type="number" inputmode="decimal" min="0" step="0.5" ' +
-      'value="' + esc(entry.weight) + '" data-field="weight" data-id="' + res.plannedId + '" placeholder="–"></div>' +
-      '<div class="field"><label for="r-' + res.plannedId + '">Wiederholungen</label>' +
-      '<input id="r-' + res.plannedId + '" type="number" inputmode="numeric" min="0" step="1" ' +
-      'value="' + esc(entry.reps) + '" data-field="reps" data-id="' + res.plannedId + '" placeholder="–"></div>' +
-      '</div>' +
-      '<div class="actions">' +
-      '<a class="btn btn--soft btn--sm" href="#/uebung/' + ex.id + '">Übung ansehen</a>' +
-      '<button class="btn btn--muted btn--sm" data-action="swap" data-id="' + res.plannedId + '">Übung tauschen</button>' +
-      '</div></div>';
+    const io = withIO ? '<div class="io-fields">' +
+      '<div class="field"><label for="w-'+res.plannedId+'">Gewicht kg</label>' +
+      '<input id="w-'+res.plannedId+'" type="number" inputmode="decimal" min="0" step="0.5" value="'+esc(entry.weight)+'" data-field="weight" data-id="'+res.plannedId+'" placeholder="–"></div>' +
+      '<div class="field"><label for="r-'+res.plannedId+'">Wdh.</label>' +
+      '<input id="r-'+res.plannedId+'" type="number" inputmode="numeric" min="0" step="1" value="'+esc(entry.reps)+'" data-field="reps" data-id="'+res.plannedId+'" placeholder="–"></div></div>' : '';
+
+    return '<div class="exercise '+(entry.done?'done':'')+'">' +
+      '<div class="head"><div class="grow"><div class="num">'+esc(num)+'</div><h3>'+esc(ex.name)+'</h3>' +
+      '<div class="scheme">'+ex.sets+' × '+esc(ex.reps)+'</div></div>' +
+      checkEl(entry.done, ex.name+' erledigt', 'toggle-ex', res.plannedId)+'</div>' +
+      notice + io +
+      '<div class="ex-actions">' +
+      '<a class="btn btn--soft btn--sm" href="#/uebung/'+ex.id+'">Übung ansehen</a>' +
+      '<button class="btn btn--muted btn--sm" data-action="swap" data-id="'+res.plannedId+'">Tauschen</button></div></div>';
   }
 
   function renderNotFound(id) {
-    return '<div class="view view--noflow">' +
-      '<div class="topbar"><a class="iconbtn" href="#/" aria-label="Zurück">‹</a>' +
-      '<h1>Nicht gefunden</h1></div>' +
-      '<div class="card center stack">' +
-      '<div class="hero">🧭</div>' +
-      '<h2>Dieses Training gibt es nicht</h2>' +
-      '<p class="muted">Die angeforderte Workout-ID „' + esc(id) + '“ ist unbekannt.</p>' +
+    return '<div class="view view--full">' +
+      '<div class="topbar"><a class="iconbtn" href="#/" aria-label="Zurück">‹</a><h1>Nicht gefunden</h1></div>' +
+      '<div class="card center stack"><div class="hero-ex">🧭</div>' +
+      '<h2>Gibt es nicht</h2><p class="muted">Die Kennung „'+esc(id)+'" ist unbekannt.</p>' +
       '<a class="btn btn--block" href="#/">Zur Übersicht</a></div></div>';
   }
 
   /* ---------- Verlauf ---------- */
   function renderVerlauf() {
-    var header = '<div class="topbar"><h1>Verlauf</h1></div>';
-
-    if (state.history.length === 0) {
-      return '<div class="view">' + header +
-        '<div class="card empty"><span class="emoji">📈</span>' +
-        '<p>Noch keine Trainings absolviert.</p>' +
-        '<p class="small">Starte dein erstes Training über die Übersicht – ' +
-        'danach erscheint hier dein Fortschritt.</p>' +
+    const header = '<div class="topbar"><div class="grow"><p class="eyebrow">Logbuch</p><h1>Verlauf</h1></div></div>';
+    if (!state.history.length) {
+      return '<div class="view">'+header +
+        '<div class="card empty"><span class="emoji">📈</span><p>Noch keine Einheiten.</p>' +
+        '<p class="small">Starte dein erstes Training über „Heute" – danach erscheint hier dein Fortschritt.</p>' +
         '<a class="btn" href="#/">Zur Übersicht</a></div></div>';
     }
-
-    // Chart-Karte
-    var series = chartSeries();
-    var chartAlt = series.length
-      ? series.map(function (p) { return formatDate(p.date) + ': ' + p.max + ' kg'; }).join(' · ')
-      : 'Noch keine Gewichtsangaben erfasst.';
-    var chartCard =
-      '<div class="card"><h3>Maximales Trainingsgewicht pro Session</h3>' +
+    const series = chartSeries();
+    const alt = series.length ? series.map(function (p){ return formatDate(p.date)+': '+p.max+' kg'; }).join(' · ') : 'Noch keine Gewichtsdaten.';
+    const chart = '<div class="card"><h3>Maximalgewicht pro Einheit</h3>' +
       (series.length
-        ? '<div class="chart-wrap"><canvas id="chart" width="520" height="200" role="img" ' +
-          'aria-label="Liniendiagramm des maximalen Gewichts pro Session. ' + esc(chartAlt) + '"></canvas></div>'
-        : '<p class="muted small">Noch keine Gewichtsangaben – trage bei Übungen ein Gewicht ein, ' +
-          'dann erscheint hier die Kurve.</p>') +
-      '<p class="small muted">' + esc(chartAlt) + '</p></div>';
+        ? '<div class="chart-wrap"><canvas id="chart" width="520" height="190" role="img" aria-label="Verlauf des Maximalgewichts pro Einheit. '+esc(alt)+'"></canvas></div>'
+        : '<p class="muted small">Trag bei Übungen Gewichte ein – dann erscheint hier die Kurve.</p>') +
+      '<p class="small muted">'+esc(alt)+'</p></div>';
 
-    var items = state.history.map(function (h) {
+    const items = state.history.map(function (h) {
       var lines;
-      if (h.workoutId === 'D') {
-        lines = '<ul><li>' + esc(h.endurance || 'Ausdauereinheit') + '</li></ul>';
-      } else {
-        lines = '<ul>' + h.exercises.map(function (e) {
-          var detail = [];
-          if (e.weight) detail.push(e.weight + ' kg');
-          if (e.doneReps) detail.push(e.doneReps + ' Wdh.');
-          var suffix = detail.length ? ' – ' + detail.join(', ') : ' – ' + e.sets + '×' + e.reps;
-          return '<li>' + esc(e.name) + esc(suffix) + '</li>';
-        }).join('') + '</ul>';
-      }
+      if (h.type === 'CONDITION') lines = '<ul><li>'+esc(h.conditioning || 'Ausdauereinheit')+'</li></ul>';
+      else lines = '<ul>'+h.exercises.map(function (e) {
+        var d = []; if (e.weight) d.push(e.weight+' kg'); if (e.doneReps) d.push(e.doneReps+' Wdh.');
+        return '<li>'+esc(e.name)+(d.length?' – '+esc(d.join(', ')):' – '+e.sets+'×'+e.reps)+'</li>';
+      }).join('')+'</ul>';
 
-      var editRow;
+      var edit;
       if (editingHistoryId === h.id) {
-        editRow =
-          '<div class="inline-fields" style="margin-top:10px">' +
-          '<div class="field" style="flex:1"><input type="date" id="hd-' + h.id + '" value="' + esc(h.date) + '"></div>' +
-          '<button class="btn btn--sm" data-action="save-history-date" data-id="' + h.id + '">Speichern</button>' +
-          '<button class="btn btn--muted btn--sm" data-action="cancel-edit">Abbrechen</button></div>';
+        edit = '<div class="inline-fields" style="margin-top:10px">' +
+          '<div class="field" style="flex:1"><input type="date" id="hd-'+h.id+'" value="'+esc(h.date)+'"></div>' +
+          '<button class="btn btn--sm" data-action="save-history-date" data-id="'+h.id+'">OK</button>' +
+          '<button class="btn btn--muted btn--sm" data-action="cancel-edit">×</button></div>';
       } else {
-        editRow =
-          '<div class="btn-row" style="margin-top:10px">' +
-          '<button class="btn btn--soft btn--sm" data-action="edit-history" data-id="' + h.id + '">Datum ändern</button>' +
-          '<button class="btn btn--danger btn--sm" data-action="delete-history" data-id="' + h.id + '">Löschen</button></div>';
+        edit = '<div class="btn-row" style="margin-top:10px">' +
+          '<button class="btn btn--soft btn--sm" data-action="edit-history" data-id="'+h.id+'">Datum ändern</button>' +
+          '<button class="btn btn--crit btn--sm" data-action="delete-history" data-id="'+h.id+'">Löschen</button></div>';
       }
+      const metaTags = '<div class="tags" style="margin-top:4px">' +
+        (h.location?'<span class="tag">📍 '+esc(h.location)+'</span>':'') +
+        (h.minutes?'<span class="tag">⏱ '+h.minutes+'′</span>':'') + '</div>';
 
       return '<div class="card history-item">' +
-        '<div class="meta"><h3 style="margin:0">' + esc(h.workoutName) + '</h3>' +
-        '<span class="small muted">' + formatDate(h.date) + '</span></div>' +
-        lines + editRow + '</div>';
+        '<div class="meta"><h3 style="margin:0">'+(SESSIONS[h.type]?SESSIONS[h.type].icon+' ':'')+esc(h.typeName)+'</h3>' +
+        '<span class="small muted tnum">'+formatDate(h.date)+'</span></div>'+metaTags+lines+edit+'</div>';
     }).join('');
 
-    return '<div class="view">' + header + chartCard + items + '</div>';
+    return '<div class="view">'+header+chart+items+'</div>';
   }
 
   function chartSeries() {
-    // älteste zuerst (links), nur Sessions mit numerischem Gewicht
     return state.history.slice().reverse().map(function (h) {
-      var weights = (h.exercises || []).map(function (e) { return parseFloat(e.weight); })
-        .filter(function (v) { return !isNaN(v) && v > 0; });
-      return { date: h.date, max: weights.length ? Math.max.apply(null, weights) : 0 };
-    }).filter(function (p) { return p.max > 0; });
+      const w = (h.exercises||[]).map(function (e){ return parseFloat(e.weight); }).filter(function (v){ return !isNaN(v) && v>0; });
+      return { date:h.date, max: w.length ? Math.max.apply(null, w) : 0 };
+    }).filter(function (p){ return p.max > 0; });
   }
 
   function drawChart() {
-    var canvas = document.getElementById('chart');
-    if (!canvas) return;
-    var series = chartSeries();
-    if (!series.length) return;
+    const canvas = document.getElementById('chart'); if (!canvas) return;
+    const series = chartSeries(); if (!series.length) return;
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = canvas.clientWidth || 320, cssH = 190;
+    canvas.width = cssW * dpr; canvas.height = cssH * dpr;
+    const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr); ctx.clearRect(0,0,cssW,cssH);
+    const css = getComputedStyle(document.documentElement);
+    const orange = (css.getPropertyValue('--orange') || '#ff6a2b').trim();
+    const line = (css.getPropertyValue('--line') || '#273341').trim();
+    const muted = (css.getPropertyValue('--muted') || '#94a3b6').trim();
+    const padL = 38, padR = 14, padT = 14, padB = 26;
+    const w = cssW - padL - padR, h = cssH - padT - padB;
+    const maxV = Math.max.apply(null, series.map(function (p){ return p.max; }));
+    const niceMax = Math.max(5, Math.ceil(maxV/5)*5);
 
-    var dpr = window.devicePixelRatio || 1;
-    var cssW = canvas.clientWidth || 320;
-    var cssH = 200;
-    canvas.width = cssW * dpr;
-    canvas.height = cssH * dpr;
-    var ctx = canvas.getContext('2d');
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, cssW, cssH);
+    ctx.strokeStyle = line; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(padL,padT); ctx.lineTo(padL,padT+h); ctx.lineTo(padL+w,padT+h); ctx.stroke();
+    ctx.font = '11px ui-monospace, monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    for (var g=0; g<=2; g++) { var val=(niceMax/2)*g, yy=padT+h-(val/niceMax)*h;
+      ctx.strokeStyle = line; ctx.globalAlpha=.5; ctx.beginPath(); ctx.moveTo(padL,yy); ctx.lineTo(padL+w,yy); ctx.stroke(); ctx.globalAlpha=1;
+      ctx.fillStyle = muted; ctx.fillText(String(val), padL-6, yy); }
 
-    var padL = 38, padR = 14, padT = 14, padB = 26;
-    var w = cssW - padL - padR;
-    var h = cssH - padT - padB;
+    function xAt(i){ return series.length===1 ? padL+w/2 : padL+(i/(series.length-1))*w; }
+    function yAt(v){ return padT+h-(v/niceMax)*h; }
 
-    var maxV = Math.max.apply(null, series.map(function (p) { return p.max; }));
-    var niceMax = Math.max(5, Math.ceil(maxV / 5) * 5);
+    ctx.beginPath(); ctx.moveTo(xAt(0), padT+h);
+    series.forEach(function (p,i){ ctx.lineTo(xAt(i), yAt(p.max)); });
+    ctx.lineTo(xAt(series.length-1), padT+h); ctx.closePath();
+    ctx.fillStyle = orange; ctx.globalAlpha = .12; ctx.fill(); ctx.globalAlpha = 1;
 
-    // Achsen
-    ctx.strokeStyle = '#d9d2c4';
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(padL, padT); ctx.lineTo(padL, padT + h); ctx.lineTo(padL + w, padT + h); ctx.stroke();
-
-    // Gitter + Y-Beschriftung
-    ctx.fillStyle = '#5c6b65';
-    ctx.font = '11px -apple-system, sans-serif';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-    for (var g = 0; g <= 2; g++) {
-      var val = (niceMax / 2) * g;
-      var yy = padT + h - (val / niceMax) * h;
-      ctx.strokeStyle = '#efeadd';
-      ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(padL + w, yy); ctx.stroke();
-      ctx.fillText(String(val), padL - 6, yy);
-    }
-
-    function xAt(i) {
-      return series.length === 1 ? padL + w / 2 : padL + (i / (series.length - 1)) * w;
-    }
-    function yAt(v) { return padT + h - (v / niceMax) * h; }
-
-    // Linie
-    ctx.strokeStyle = '#12805c';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    series.forEach(function (p, i) {
-      var x = xAt(i), y = yAt(p.max);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-
-    // Punkte + X-Labels (nur erstes/letztes, um Überlappung zu vermeiden)
-    ctx.fillStyle = '#12805c';
-    series.forEach(function (p, i) {
-      var x = xAt(i), y = yAt(p.max);
-      ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fill();
-    });
-    ctx.fillStyle = '#5c6b65';
-    ctx.textBaseline = 'top';
-    ctx.textAlign = 'left';
-    ctx.fillText(formatDate(series[0].date).slice(0, 5), padL, padT + h + 6);
-    if (series.length > 1) {
-      ctx.textAlign = 'right';
-      ctx.fillText(formatDate(series[series.length - 1].date).slice(0, 5), padL + w, padT + h + 6);
-    }
+    ctx.strokeStyle = orange; ctx.lineWidth = 2.5; ctx.beginPath();
+    series.forEach(function (p,i){ var x=xAt(i), y=yAt(p.max); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); }); ctx.stroke();
+    ctx.fillStyle = orange;
+    series.forEach(function (p,i){ ctx.beginPath(); ctx.arc(xAt(i), yAt(p.max), 3.5, 0, Math.PI*2); ctx.fill(); });
+    ctx.fillStyle = muted; ctx.textBaseline='top'; ctx.textAlign='left';
+    ctx.fillText(formatDate(series[0].date).slice(0,5), padL, padT+h+6);
+    if (series.length>1){ ctx.textAlign='right'; ctx.fillText(formatDate(series[series.length-1].date).slice(0,5), padL+w, padT+h+6); }
   }
 
-  /* ---------- Material ---------- */
-  function renderMaterial() {
+  /* ---------- Orte ---------- */
+  function renderOrte() {
     return '<div class="view">' +
-      '<div class="topbar"><h1>Material</h1></div>' +
-      '<p class="muted small" style="margin-bottom:12px">Wähle aus, was dir zur Verfügung steht. ' +
-      'Änderungen wirken sich sofort auf deinen Trainingsplan aus.</p>' +
-      '<div class="card"><h3>Standard-Geräte</h3>' + equipTogglesHTML() + '</div>' +
-      '<div class="card"><h3>Eigene Geräte</h3>' +
-      '<p class="small muted" style="margin-bottom:10px">Zusätzliche Geräte für deine Übersicht. ' +
-      '(Bewusst manuell – keine Kamera/KI-Erkennung, damit die App kostenlos bleibt.)</p>' +
-      customEquipHTML('mat') + '</div>' +
+      '<div class="topbar"><div class="grow"><p class="eyebrow">Material-Profile</p><h1>Orte</h1></div></div>' +
+      '<p class="muted small" style="margin-bottom:12px">Lege für jeden Ort fest, welches Material da ist. ' +
+      'Der aktive Ort bestimmt, womit der Plan rechnet. Tipp auf einen Ort zum Bearbeiten.</p>' +
+      '<div class="card card--tight"><div class="small muted" style="margin-bottom:8px">Aktiver Ort</div>' +
+      '<div class="loc-switch">' + state.locations.map(function (l) {
+        const on = l.id === state.activeLocationId;
+        return '<button class="loc-chip" aria-pressed="'+(on?'true':'false')+'" data-action="set-loc" data-id="'+l.id+'">' +
+          '<span class="n">'+esc(l.icon||'📍')+' '+esc(l.name)+'</span><span class="g">'+(l.equipment.length?l.equipment.length+' Geräte':'Eigengewicht')+'</span></button>';
+      }).join('') + '</div></div>' +
+      locationsEditorHTML() +
       '</div>';
   }
 
-  /* ---------- Beschwerden & Einstellungen ---------- */
-  function renderBeschwerden() {
+  /* ---------- Einstellungen ---------- */
+  function renderSettings() {
     return '<div class="view">' +
-      '<div class="topbar"><h1>Beschwerden</h1></div>' +
-      '<div class="card"><h3>Aktuelle Beschwerden</h3>' +
-      '<p class="small muted" style="margin-bottom:10px">Betroffene Übungen werden automatisch ' +
-      'durch sichere Alternativen ersetzt.</p>' +
+      '<div class="topbar"><div class="grow"><p class="eyebrow">Konfiguration</p><h1>Einstellungen</h1></div></div>' +
+
+      '<div class="card"><h3>Trainingsmenge</h3>'+freqDurationHTML()+'</div>' +
+
+      '<div class="card"><h3>Beschwerden</h3>' +
+      '<p class="small muted" style="margin-bottom:10px">Betroffene Übungen werden automatisch sicher ersetzt. ' +
+      'Du kannst das auch direkt auf dem Dashboard pro Tag setzen.</p>' +
       complaintTogglesHTML() +
-      '<div class="field"><label for="ctext">Sonstige Beschwerden</label>' +
-      '<textarea id="ctext" data-field="complaintsText" placeholder="z. B. Nacken verspannt">' +
-      esc(state.complaintsText) + '</textarea>' +
-      '<p class="small muted">Wird im Training als Hinweis angezeigt (ohne automatische Anpassung).</p></div>' +
-      '</div>' +
-      '<div class="card"><h3>Einstellungen · Frequenz</h3>' +
-      frequencyFieldsHTML() +
-      '<p class="small muted">Bestimmt die Anzahl der Slots in „Deine Woche“ und den 4-Wochen-Fortschritt.</p>' +
-      '</div>' +
+      '<div class="field"><label for="ct">Sonstige Beschwerden</label>' +
+      '<textarea id="ct" data-field="complaintsText" placeholder="z. B. Nacken verspannt">'+esc(state.complaintsText)+'</textarea>' +
+      '<p class="small muted">Wird im Training als Hinweis angezeigt.</p></div></div>' +
+
+      '<div class="card"><h3>Ausrichtung</h3>' +
+      '<p class="small"><span class="pill pill--orange">Schwerpunkt Polizei / Feuerwehr</span></p>' +
+      '<p class="small muted" style="margin:8px 0 0">Kraft, Work Capacity, Tragen &amp; Greifen, Kondition. ' +
+      'Im Winter'+(isWinter()?' (aktuell aktiv)':'')+' kommt automatisch eine Ski-Prep-Einheit dazu (Beine, Balance, Knie-Prävention).</p></div>' +
+
+      '<div class="card"><h3>Design</h3>' +
+      '<div class="chips">' +
+      ['auto','dark','light'].map(function (t) {
+        const label = t==='auto'?'◐ Automatisch':t==='dark'?'🌙 Dunkel':'☀️ Hell';
+        return '<button class="chip" aria-pressed="'+(state.theme===t?'true':'false')+'" data-action="set-theme" data-theme="'+t+'">'+label+'</button>';
+      }).join('') + '</div></div>' +
+
+      '<div class="card"><h3>Profil</h3>' +
+      '<div class="field"><label for="nm">Name (optional)</label>' +
+      '<input type="text" id="nm" value="'+esc(state.name)+'" data-field="name" placeholder="Dein Name"></div>' +
+      '<div class="btn-row" style="margin-top:14px">' +
+      '<button class="btn btn--crit" data-action="reset-all">Alle Daten zurücksetzen</button></div></div>' +
+
+      '<p class="center small faint" style="margin-top:6px">EinsatzFit · läuft offline · Daten nur auf diesem Gerät</p>' +
       '</div>';
   }
 
   /* ---------- Übungsdetail ---------- */
   function renderUebung(id) {
-    var ex = EXERCISES[id];
-    if (!ex) return renderNotFound(id);
-
-    var eqTags = ex.equipment.length
-      ? ex.equipment.map(function (e) { return '<span class="tag">' + esc(EQUIP_LABELS[e] || e) + '</span>'; }).join('')
-      : '<span class="tag">Kein Gerät nötig</span>';
-    var loadTags = ex.loads.length
-      ? ex.loads.map(function (l) { return '<span class="tag tag--load">belastet ' + esc(COMPLAINT_LABELS[l] || l) + '</span>'; }).join('')
-      : '';
-
-    var steps = '<ol class="steps">' + ex.steps.map(function (s) {
-      return '<li>' + esc(s) + '</li>';
-    }).join('') + '</ol>';
-
+    const ex = EX[id]; if (!ex) return renderNotFound(id);
+    const eqTags = (ex.equipment && ex.equipment.length)
+      ? '<span class="tag">benötigt: '+ex.equipment.map(function (e){ return EQUIP[e]?EQUIP[e].label:e; }).join(' / ')+'</span>'
+      : '<span class="tag">kein Gerät nötig</span>';
+    const loadTags = ex.loads.map(function (l){ return '<span class="tag tag--load">belastet '+(COMPLAINTS[l]?COMPLAINTS[l].label:l)+'</span>'; }).join('');
+    const steps = '<ol class="steps">'+ex.steps.map(function (s){ return '<li>'+esc(s)+'</li>'; }).join('')+'</ol>';
+    const coach = ex.coach ? '<div class="coach">💡 '+esc(ex.coach)+'</div>' : '';
     return '<div class="view">' +
       '<div class="topbar"><a class="iconbtn" href="#/" aria-label="Zurück">‹</a>' +
-      '<h1 style="font-size:1.2rem">' + esc(ex.name) + '</h1></div>' +
-      '<div class="hero">' + (ex.emoji || '💪') + '</div>' +
-      '<div class="card stack">' +
-      '<div><h3>Zielmuskulatur</h3><p class="muted" style="margin:0">' + esc(ex.target) + '</p></div>' +
-      '<div class="tags">' + eqTags + loadTags + '</div>' +
-      '</div>' +
-      '<div class="card"><h3>So geht’s</h3>' + steps + '</div>' +
-      '<div class="card stack">' +
-      '<p class="small muted">Kurzes Übungsvideo gesucht? Öffne eine YouTube-Suche ' +
-      '(kein eigenes Video-Hosting).</p>' +
-      '<a class="btn btn--ghost btn--block" href="' + ytLink(ex.name) + '" target="_blank" rel="noopener">' +
-      '▶ Auf YouTube suchen</a></div>' +
+      '<h1 style="font-size:1.2rem">'+esc(ex.name)+'</h1></div>' +
+      '<div class="hero-ex">'+(ex.emoji||'💪')+'</div>' +
+      '<div class="card stack"><div><h3>Zielmuskulatur</h3><p class="muted" style="margin:0">'+esc(ex.target)+'</p></div>' +
+      '<div><h3 style="margin-bottom:6px">Schema</h3><p class="tnum" style="margin:0">'+ex.sets+' Sätze × '+esc(ex.reps)+'</p></div>' +
+      '<div class="tags">'+eqTags+loadTags+'</div></div>' +
+      '<div class="card"><h3>So geht’s</h3>'+steps+coach+'</div>' +
+      '<div class="card stack"><p class="small muted">Kurzes Technik-Video? Öffnet eine YouTube-Suche (kein eigenes Hosting).</p>' +
+      '<a class="btn btn--ghost btn--block" href="'+ytLink(ex.name)+'" target="_blank" rel="noopener">▶ Auf YouTube suchen</a></div>' +
       '</div>';
   }
 
   /* ----------------------------------------------------------------------
-     Event-Handling (Delegation)
+     Events
      ---------------------------------------------------------------------- */
   function onClick(ev) {
-    var el = ev.target.closest('[data-action]');
-    if (!el) return;
-    var action = el.getAttribute('data-action');
+    const el = ev.target.closest('[data-action]'); if (!el) return;
+    const a = el.getAttribute('data-action');
+    switch (a) {
+      case 'onb-next': onboardStep = Math.min(5, onboardStep+1); render(); break;
+      case 'onb-back': onboardStep = Math.max(1, onboardStep-1); render(); break;
+      case 'onb-finish': state.onboarded = true; save(); onboardStep = 1; location.hash = '#/'; render(); break;
 
-    switch (action) {
-      case 'onb-next':
-        onboardStep = Math.min(4, onboardStep + 1); render(); break;
-      case 'onb-back':
-        onboardStep = Math.max(1, onboardStep - 1); render(); break;
-      case 'onb-finish':
-        state.onboarded = true; save(); onboardStep = 1;
-        location.hash = '#/'; render(); break;
+      case 'cycle-theme': {
+        state.theme = state.theme==='auto'?'dark':state.theme==='dark'?'light':'auto';
+        applyTheme(); save(); render(); break;
+      }
+      case 'set-theme': state.theme = el.getAttribute('data-theme'); applyTheme(); save(); render(); break;
 
-      case 'toggle-complaint': {
-        var ck = el.getAttribute('data-key');
-        state.complaints[ck] = !state.complaints[ck]; save(); render(); break;
-      }
-      case 'toggle-equip': {
-        var ek = el.getAttribute('data-key');
-        var i = state.equipment.indexOf(ek);
-        if (i === -1) state.equipment.push(ek); else state.equipment.splice(i, 1);
-        save(); render(); break;
-      }
-      case 'add-equip': {
-        var input = document.getElementById('newEquipInput');
-        if (input && input.value.trim()) {
-          state.customEquipment.push(input.value.trim()); save(); render();
-        }
-        break;
-      }
-      case 'remove-equip': {
-        var idx = parseInt(el.getAttribute('data-index'), 10);
-        state.customEquipment.splice(idx, 1); save(); render(); break;
-      }
+      case 'toggle-complaint': { const k = el.getAttribute('data-key'); state.complaints[k] = !state.complaints[k]; save(); render(); break; }
 
-      case 'toggle-warmup':
-        if (state.currentSession) { state.currentSession.warmup = !state.currentSession.warmup; save(); render(); }
-        break;
-      case 'toggle-cooldown':
-        if (state.currentSession) { state.currentSession.cooldown = !state.currentSession.cooldown; save(); render(); }
-        break;
-      case 'toggle-endurance':
-        if (state.currentSession && state.currentSession.entries.endurance) {
-          var en = state.currentSession.entries.endurance;
-          en.done = !en.done; save(); render();
-        }
-        break;
-      case 'toggle-exercise': {
-        var pid = el.getAttribute('data-id');
-        if (state.currentSession && state.currentSession.entries[pid]) {
-          var e2 = state.currentSession.entries[pid];
-          e2.done = !e2.done; save(); render();
-        }
+      case 'set-loc': state.activeLocationId = el.getAttribute('data-id'); save(); render(); break;
+      case 'toggle-loc-edit': editLocationId = (editLocationId === el.getAttribute('data-id')) ? null : el.getAttribute('data-id'); render(); break;
+      case 'toggle-loc-equip': {
+        const lid = el.getAttribute('data-id'), eq = el.getAttribute('data-eq');
+        const loc = state.locations.find(function (l){ return l.id === lid; });
+        if (loc) { const i = loc.equipment.indexOf(eq); if (i===-1) loc.equipment.push(eq); else loc.equipment.splice(i,1); save(); render(); }
         break;
       }
-      case 'swap':
-        swapExercise(el.getAttribute('data-id')); render(); break;
-      case 'finish':
-        finishWorkout(); break;
-
-      case 'restart':
-        if (confirm('Neues 4-Wochen-Programm starten? Dein bisheriger Verlauf bleibt erhalten.')) {
-          state.programStartIndex = strengthTotal(); save(); render();
-        }
+      case 'add-loc': {
+        const inp = document.getElementById('newLocInput');
+        if (inp && inp.value.trim()) { const nl = { id:uid(), name:inp.value.trim(), icon:'📍', equipment:[] }; state.locations.push(nl); editLocationId = nl.id; save(); render(); }
         break;
-
-      case 'edit-history':
-        editingHistoryId = el.getAttribute('data-id'); render(); break;
-      case 'cancel-edit':
-        editingHistoryId = null; render(); break;
-      case 'save-history-date': {
-        var hid = el.getAttribute('data-id');
-        var di = document.getElementById('hd-' + hid);
-        if (di && di.value) {
-          var entry = state.history.filter(function (x) { return x.id === hid; })[0];
-          if (entry) entry.date = di.value;
-          save();
-        }
-        editingHistoryId = null; render(); break;
       }
-      case 'delete-history': {
-        if (confirm('Diesen Eintrag wirklich löschen?')) {
-          var did = el.getAttribute('data-id');
-          state.history = state.history.filter(function (x) { return x.id !== did; });
+      case 'remove-loc': {
+        const lid = el.getAttribute('data-id');
+        if (state.locations.length <= 1) { alert('Mindestens ein Ort muss bestehen bleiben.'); break; }
+        if (confirm('Diesen Ort löschen?')) {
+          state.locations = state.locations.filter(function (l){ return l.id !== lid; });
+          if (state.activeLocationId === lid) state.activeLocationId = state.locations[0].id;
+          if (editLocationId === lid) editLocationId = null;
           save(); render();
         }
         break;
       }
-    }
-  }
 
-  // Live-Speicherung für Texteingaben ohne Re-Render (Fokus bleibt erhalten).
-  function onInput(ev) {
-    var t = ev.target;
-    var field = t.getAttribute('data-field');
-    if (!field) return;
+      case 'freq-dec': state.frequency = Math.max(2, state.frequency-1); save(); render(); break;
+      case 'freq-inc': state.frequency = Math.min(6, state.frequency+1); save(); render(); break;
+      case 'dur-dec': state.sessionMinutes = Math.max(20, state.sessionMinutes-5); save(); render(); break;
+      case 'dur-inc': state.sessionMinutes = Math.min(75, state.sessionMinutes+5); save(); render(); break;
 
-    if (field === 'weight' || field === 'reps') {
-      var id = t.getAttribute('data-id');
-      if (state.currentSession && state.currentSession.entries[id]) {
-        state.currentSession.entries[id][field] = t.value;
-        save();
+      case 'toggle-warmup': if (state.currentSession){ state.currentSession.warmup = !state.currentSession.warmup; save(); render(); } break;
+      case 'toggle-cooldown': if (state.currentSession){ state.currentSession.cooldown = !state.currentSession.cooldown; save(); render(); } break;
+      case 'toggle-cond': if (state.currentSession){ state.currentSession.condDone = !state.currentSession.condDone; save(); render(); } break;
+      case 'toggle-ex': {
+        const pid = el.getAttribute('data-id');
+        if (state.currentSession && state.currentSession.entries[pid]) { const e = state.currentSession.entries[pid]; e.done = !e.done; save(); render(); }
+        break;
       }
-    } else if (field === 'complaintsText') {
-      state.complaintsText = t.value;
-      save();
+      case 'swap': swapExercise(el.getAttribute('data-id')); render(); break;
+      case 'finish': finishSession(); break;
+
+      case 'edit-history': editingHistoryId = el.getAttribute('data-id'); render(); break;
+      case 'cancel-edit': editingHistoryId = null; render(); break;
+      case 'save-history-date': {
+        const hid = el.getAttribute('data-id'); const di = document.getElementById('hd-'+hid);
+        if (di && di.value) { const en = state.history.find(function (x){ return x.id === hid; }); if (en) en.date = di.value; save(); }
+        editingHistoryId = null; render(); break;
+      }
+      case 'delete-history': {
+        if (confirm('Diesen Eintrag löschen?')) { const hid = el.getAttribute('data-id');
+          state.history = state.history.filter(function (x){ return x.id !== hid; }); save(); render(); }
+        break;
+      }
+      case 'reset-all': {
+        if (confirm('Wirklich ALLE Daten löschen und neu beginnen?')) { localStorage.removeItem(KEY); state = defaultState(); onboardStep = 1; applyTheme(); location.hash = '#/'; render(); }
+        break;
+      }
     }
   }
 
-  // Änderungen an Dropdowns (Frequenz) – Re-Render zum Aktualisieren der Ansicht.
-  function onChange(ev) {
-    var t = ev.target;
-    var field = t.getAttribute('data-field');
-    if (field === 'freqStrength') {
-      state.frequency.strength = parseInt(t.value, 10); save(); render();
-    } else if (field === 'freqEndurance') {
-      state.frequency.endurance = parseInt(t.value, 10); save(); render();
-    }
+  function onInput(ev) {
+    const t = ev.target; const f = t.getAttribute('data-field'); if (!f) return;
+    if (f === 'weight' || f === 'reps') {
+      const id = t.getAttribute('data-id');
+      if (state.currentSession && state.currentSession.entries[id]) { state.currentSession.entries[id][f] = t.value; save(); }
+    } else if (f === 'complaintsText') { state.complaintsText = t.value; save(); }
+    else if (f === 'name') { state.name = t.value; save(); }
+    else if (f === 'loc-name') { const loc = state.locations.find(function (l){ return l.id === t.getAttribute('data-id'); }); if (loc) { loc.name = t.value; save(); } }
   }
 
-  // Tastatur: Enter/Leertaste auf role="checkbox" löst Klick aus (Barrierefreiheit).
   function onKey(ev) {
     if (ev.key !== 'Enter' && ev.key !== ' ' && ev.key !== 'Spacebar') return;
-    var el = ev.target.closest('[role="checkbox"][data-action]');
+    const el = ev.target.closest('[role="checkbox"][data-action]');
     if (el) { ev.preventDefault(); el.click(); }
   }
 
@@ -1455,26 +1150,18 @@
      ---------------------------------------------------------------------- */
   function init() {
     state = load();
-
-    var app = document.getElementById('app');
+    applyTheme();
+    const app = document.getElementById('app');
     app.addEventListener('click', onClick);
     app.addEventListener('input', onInput);
-    app.addEventListener('change', onChange);
     app.addEventListener('keydown', onKey);
-
     window.addEventListener('hashchange', render);
     render();
-
     if ('serviceWorker' in navigator) {
-      window.addEventListener('load', function () {
-        navigator.serviceWorker.register('sw.js').catch(function () { /* offline egal */ });
-      });
+      window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
     }
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
 })();

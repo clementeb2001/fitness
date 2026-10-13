@@ -1,72 +1,63 @@
-# Fit wieder starten
+# EinsatzFit
 
-Eine kostenlose, eigenständige **Progressive Web App (PWA)** für den Wiedereinstieg
-ins Training nach einer Pause – zuhause mit **Kurzhanteln** und **Widerstandsband**.
+Professionelle, installierbare **Trainings-App (PWA)** für **Einsatzkräfte** –
+Schwerpunkt **Polizei & Feuerwehr**, mit **Ski-Vorbereitung** im Winter.
 
-- **Keine Anmeldung, kein Backend, kein Server** – alles läuft clientseitig im Browser.
-- Persistenz ausschließlich über `localStorage` (ein einziger JSON-State).
-- Sprache: **Deutsch**. Zielgerät: primär iPhone (Home-Bildschirm-Installation), mobile-first.
-- Reines **HTML/CSS/Vanilla-JS**, keine Frameworks, keine Build-Tools, keine externen
-  Laufzeit-Abhängigkeiten.
+- **Keine Anmeldung, kein Backend, kein Server** – alles clientseitig im Browser.
+- Persistenz ausschließlich über `localStorage` (ein JSON-State).
+- Reines **HTML/CSS/Vanilla-JS**, keine Frameworks, keine Build-Tools, offline-fähig.
+- Deutsch, mobile-first, installierbar auf dem iPhone-Home-Bildschirm.
 
-## Funktionen
+Live: **https://clementeb2001.github.io/fitness/**
 
-- **Onboarding** (mehrstufig): Begrüßung → Beschwerden → Material → Trainingsfrequenz.
-- **Dashboard**: Programmwoche (1–4), nächstes Training (A → B → C rotierend),
-  Fortschrittsbalken, „Deine Woche“, Aufwärm- & Sicherheitshinweise, Abschluss-Zustand.
-- **Trainings-Session**: Aufwärmen → Übungen → Abwärmen, Live-Speicherung jeder Eingabe,
-  Gewicht/Wiederholungen erfassen, Übung tauschen, Detaillink.
-- **Adaptions-Logik**: Übungen tragen Tags für benötigtes Material (`equipment`) und
-  belastete Körperregionen (`loads`). Fehlt Material oder belastet eine Übung eine aktive
-  Beschwerde, wird über eine kaskadierende Alternativen-Kette automatisch eine sichere
-  Übung eingesetzt – mit sichtbarem Hinweis „Ersetzt wegen: …“. Die Prüfung greift auch
-  nach einem manuellen Tausch.
-- **Verlauf**: alle Sessions, Datum bearbeiten/löschen, abhängigkeitsfreier Canvas-Chart
-  (max. Gewicht pro Session) mit textueller Alternative.
-- **Material** und **Beschwerden & Einstellungen**: jederzeit änderbar; wirkt sofort.
-- **Übungsdetail**: Zielmuskulatur, Schritt-für-Schritt-Anleitung, Bild, YouTube-Suchlink.
+## Kernfunktionen
 
-## Trainingsplan
-
-4-Wochen-Programm mit Workouts **A** (Unterkörper), **B** (Oberkörper, schulterschonend),
-**C** (Kraft & Stabilität) und **D** (Ausdauer). Ausdauer nutzt einen Gehen/Joggen-
-Intervallaufbau (Woche 1: 5× 3 Min gehen + 1 Min joggen … Woche 4: 20 Min durchgehend
-joggen) und schaltet bei aktivem Knie-Problem automatisch auf reines Gehen um.
+- **Orte mit eigenem Material** – Lege Orte an (z. B. *Wache*, *Zuhause*, *Unterwegs*)
+  und hinterlege je Ort das verfügbare Gerät. Vor jeder Einheit wählst du, wo du bist –
+  der Plan rechnet automatisch nur mit dem Material dieses Ortes.
+- **Tägliches Tagesbefinden** – Beschwerden (Rücken, Schulter, Knie, Handgelenk,
+  Ellenbogen, Sprunggelenk, Nacken) pro Tag antippbar. Betroffene Übungen werden über
+  eine kaskadierende Alternativen-Kette automatisch durch sichere Varianten ersetzt –
+  mit sichtbarem Hinweis „Ersetzt wegen …". Die Prüfung greift auch nach manuellem Tausch.
+- **Voll einstellbar** – Einheiten/Woche (2–6) **und** Dauer pro Einheit (20–75 Min).
+  Der Plan skaliert die Übungsanzahl automatisch auf die verfügbare Zeit – ideal, wenn
+  mal weniger Zeit ist.
+- **Tactical-Programm** – Session-Typen: *Kraft Unterkörper & Tragen*, *Kraft Oberkörper
+  & Zug*, *Work Capacity* (Konditionierung), *Ganzkörper*, *Ausdauer & Rucking* und im
+  Winter *Ski-Prep* (Beine exzentrisch, Balance, Knie-Prävention). Fokus auf
+  einsatzrelevante Fähigkeiten: Kraft, Arbeitskapazität, Tragen & Greifen, Kondition.
+- **Dashboard „alles im Blick"** – empfohlene Einheit, Ort-Umschalter, Tagesbefinden,
+  Wochen-Adhärenz, Serie, Wochenplan, Sicherheitshinweise.
+- **Verlauf** – alle Einheiten, Bearbeiten/Löschen, abhängigkeitsfreier Canvas-Chart
+  (Maximalgewicht über die Zeit) mit textueller Alternative.
+- **Übungsdetails** – Zielmuskulatur, Schritt-für-Schritt, Coach-Tipp, YouTube-Suchlink.
+- **Design** – dunkel/hell/automatisch, tactical „Operations-Console"-Look.
 
 ## Barrierefreiheit
 
-Abhak-Elemente mit `role="checkbox"`/`aria-checked` (per Enter/Leertaste bedienbar),
-Fortschrittsbalken mit `role="progressbar"`, Chart mit textueller Alternative,
-Navigation mit `aria-label`.
+Abhak-Elemente mit `role="checkbox"`/`aria-checked` (Enter/Leertaste), Chart mit
+textueller Alternative, Navigation mit `aria-label`, `prefers-reduced-motion` respektiert,
+beide Farbthemen voll ausgearbeitet.
 
 ## PWA / Installation
 
-`manifest.json` (installierbar, `standalone`), `sw.js` (Service Worker, Cache-first für
-Offline-Nutzung), Icons in 192px und 512px. Auf dem iPhone in Safari öffnen →
-Teilen → „Zum Home-Bildschirm“.
+`manifest.json` (installierbar, `standalone`), `sw.js` (Service Worker, Cache-first,
+offline), Icons 192/512. Auf dem iPhone in Safari öffnen → Teilen → „Zum Home-Bildschirm".
 
-## Deployment (GitHub Pages)
+## Dateien
 
-Rein statisches Hosting – kein Server nötig. Dateien:
-`index.html`, `style.css`, `app.js`, `manifest.json`, `sw.js`, `icon-192.png`, `icon-512.png`.
-
-1. Repository-Einstellungen → **Pages** → Branch auswählen, Ordner `/root`.
-2. Die App ist danach unter der GitHub-Pages-URL erreichbar.
-
-Da die App relative Pfade nutzt, funktioniert sie auch in einem Unterverzeichnis
-(z. B. `https://<user>.github.io/<repo>/`).
+`index.html`, `style.css`, `app.js`, `manifest.json`, `sw.js`, `icon-192.png`,
+`icon-512.png`. Deployment via GitHub Pages (Workflow `.github/workflows/pages.yml`,
+automatischer Deploy bei Push auf `main`).
 
 ## Lokal testen
 
-Einen einfachen statischen Server starten, z. B.:
-
 ```bash
-python3 -m http.server 8000
-# dann http://localhost:8000 öffnen
+python3 -m http.server 8000   # dann http://localhost:8000
 ```
 
 ## Bewusste Auslassungen
 
-Keine Kamera-/KI-Materialerkennung (bräuchte bezahlte Vision-API + Server) – Material wird
-manuell gepflegt. Kein Backend, keine Datenbank, kein Login. So bleibt die App **100 %
-kostenlos** und offline-fähig.
+Keine Kamera-/KI-Materialerkennung (bräuchte bezahlte Vision-API + Server) – Material
+wird über Orte manuell gepflegt. Kein Backend, keine Datenbank, kein Login. So bleibt die
+App **kostenlos** und offline-fähig.
