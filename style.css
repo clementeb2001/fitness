@@ -33,6 +33,7 @@
   --good-soft: rgba(53, 208, 127, 0.15);
   --warn-soft: rgba(245, 165, 36, 0.15);
   --crit-soft: rgba(255, 90, 95, 0.15);
+  --muscle-base: #33465c;
 
   --radius: 18px;
   --radius-sm: 12px;
@@ -70,6 +71,7 @@
     --good: #1f9d5e;
     --warn: #c9821a;
     --crit: #d62d32;
+    --muscle-base: #c3cfdd;
     --shadow: 0 6px 18px rgba(20, 34, 54, 0.1);
     --shadow-lg: 0 14px 36px rgba(20, 34, 54, 0.14);
     color-scheme: light;
@@ -83,7 +85,7 @@
   --orange: #e85d1f; --orange-ink: #c94e17; --steel: #1f74d6; --steel-ink: #195fb0;
   --accent-soft: rgba(232,93,31,.12); --steel-soft: rgba(31,116,214,.12);
   --good-soft: rgba(32,160,95,.14); --warn-soft: rgba(216,140,20,.16); --crit-soft: rgba(214,45,50,.12);
-  --good:#1f9d5e; --warn:#c9821a; --crit:#d62d32;
+  --good:#1f9d5e; --warn:#c9821a; --crit:#d62d32; --muscle-base:#c3cfdd;
   --shadow: 0 6px 18px rgba(20,34,54,.1); --shadow-lg: 0 14px 36px rgba(20,34,54,.14);
   color-scheme: light;
 }
@@ -477,6 +479,33 @@ body.has-timer .view--full { padding-bottom: calc(env(safe-area-inset-bottom, 0p
 .ef-timer[data-phase="work"] { border-top-color: var(--orange); }
 .ef-timer[data-phase="rest"] { border-top-color: var(--steel); }
 .ef-timer[data-phase="done"] { border-top-color: var(--good); }
+
+/* ---------------- Muskel-Diagramm --------------------------------------- */
+.bodymap { display: flex; gap: 12px; justify-content: center; }
+.bodyfig { margin: 0; flex: 1; max-width: 160px; text-align: center; }
+.bodyfig svg { height: 180px; display: block; margin: 0 auto; }
+.bodyfig figcaption { font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-top: 4px; font-weight: 700; }
+
+/* ---------------- Trainings-Zusammenfassung ----------------------------- */
+.sum-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.sum-grid div { background: var(--card-2); border: 1px solid var(--line-soft); border-radius: 12px; padding: 10px; text-align: center; }
+.sum-grid b { display: block; font-size: 1.25rem; font-weight: 700; letter-spacing: -.02em; }
+.sum-grid span { font-size: .66rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.sum-prs { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.sum-pr { background: var(--accent-soft); color: var(--orange); border-radius: 10px; padding: 8px 11px; font-size: .86rem; }
+.sum-pr b { color: var(--text); }
+
+/* ---------------- Toast (Update-Hinweis) -------------------------------- */
+.ef-toast {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); z-index: 60;
+  width: calc(100% - 28px); max-width: 540px;
+  background: var(--elev); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: var(--shadow-lg); padding: 10px 12px;
+  display: flex; align-items: center; gap: 10px; font-size: .9rem; font-weight: 600;
+}
+.ef-toast.hidden { display: none !important; }
+.ef-toast > span { flex: 1; }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }

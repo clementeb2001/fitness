@@ -42,6 +42,74 @@
 
   const WINTER_MONTHS = [9, 10, 11, 0, 1, 2]; // Okt–Mär (0-basiert)
 
+  // Beanspruchte Muskelgruppen je Übung (für das Muskel-Diagramm)
+  const MUSCLE_LABELS = {
+    chest:'Brust', shoulders:'Schultern', biceps:'Bizeps', triceps:'Trizeps', forearms:'Unterarme',
+    abs:'Bauch', obliques:'seitl. Bauch', quads:'Oberschenkel', hamstrings:'Beinrückseite',
+    glutes:'Gesäß', calves:'Waden', lats:'Latissimus', traps:'Trapez', lowerback:'unterer Rücken'
+  };
+  const MUS = {
+    back_squat:['quads','glutes','lowerback','abs'], bw_squat:['quads','glutes'], box_squat:['quads','glutes'],
+    deadlift:['hamstrings','glutes','lowerback','traps','forearms'], rdl:['hamstrings','glutes','lowerback'],
+    hip_thrust:['glutes','hamstrings'], glute_bridge:['glutes'], split_squat:['quads','glutes'],
+    bw_split_squat:['quads','glutes'], step_up:['quads','glutes'], walking_lunge:['quads','glutes'], calf_raise:['calves'],
+    bench_press:['chest','shoulders','triceps'], floor_press:['chest','triceps'], ohp:['shoulders','triceps'],
+    pushup:['chest','shoulders','triceps','abs'], pushup_knee:['chest','triceps'], incline_pushup:['chest','shoulders'],
+    wall_pushup:['chest','shoulders'], pullup:['lats','biceps','forearms'], inverted_row:['lats','biceps','traps'],
+    db_row:['lats','traps','biceps'], band_row:['lats','traps'], face_pull:['shoulders','traps'],
+    band_pullapart:['shoulders','traps'], scap_squeeze:['traps'], curl:['biceps','forearms'], iso_curl:['biceps'],
+    farmers_carry:['forearms','traps','abs'], suitcase_carry:['obliques','forearms'], ruck_carry:['lowerback','quads','calves'],
+    kb_swing:['glutes','hamstrings','lowerback'], thruster:['quads','shoulders','glutes'], burpee:['chest','quads','abs'],
+    squat_thrust:['quads','abs'], mountain_climber:['abs','shoulders'], jump_rope:['calves'], jumping_jack:['shoulders','calves'],
+    fast_march:['quads','calves'], box_jump:['quads','glutes','calves'],
+    plank:['abs','shoulders'], dead_bug:['abs'], bird_dog:['lowerback','glutes'], side_plank:['obliques','shoulders'],
+    side_plank_knee:['obliques'], pallof:['obliques','abs'], hollow_hold:['abs'], hanging_knee_raise:['abs','forearms'],
+    lying_leg_raise:['abs'], eccentric_squat:['quads'], skater_jump:['quads','glutes','calves'],
+    lateral_stepout:['quads','glutes'], lateral_band_walk:['glutes'], step_down:['quads','glutes'],
+    single_leg_balance:['calves','glutes'], wall_sit:['quads']
+  };
+
+  // Schematische Muskel-Shapes (ellipse/rect) für Front- und Rückenfigur.
+  const BODY_FRONT = [
+    ['head','e',30,11,8,8], ['neck','r',27,17,6,5],
+    ['shoulders','e',15,27,7,5],['shoulders','e',45,27,7,5],
+    ['chest','e',23,39,8,6],['chest','e',37,39,8,6],
+    ['biceps','e',12,49,4,9],['biceps','e',48,49,4,9],
+    ['forearms','e',9,67,3.6,9],['forearms','e',51,67,3.6,9],
+    ['abs','r',24,47,12,22],
+    ['obliques','e',19,58,3,8],['obliques','e',41,58,3,8],
+    ['quads','e',23,93,6.5,17],['quads','e',37,93,6.5,17],
+    ['calves','e',23,126,5,13],['calves','e',37,126,5,13]
+  ];
+  const BODY_BACK = [
+    ['head','e',30,11,8,8], ['neck','r',27,17,6,5],
+    ['traps','e',30,26,12,5],
+    ['lats','e',22,45,7,11],['lats','e',38,45,7,11],
+    ['triceps','e',12,49,4,9],['triceps','e',48,49,4,9],
+    ['forearms','e',9,67,3.6,9],['forearms','e',51,67,3.6,9],
+    ['lowerback','r',25,56,10,12],
+    ['glutes','e',24,76,7,7],['glutes','e',36,76,7,7],
+    ['hamstrings','e',23,97,6.5,15],['hamstrings','e',37,97,6.5,15],
+    ['calves','e',23,126,5,13],['calves','e',37,126,5,13]
+  ];
+  function figureSVG(shapes, hi, label) {
+    var body = shapes.map(function (s) {
+      var g = s[0], t = s[1];
+      var neutral = (g === 'head' || g === 'neck');
+      var on = !neutral && hi.indexOf(g) !== -1;
+      var fill = neutral ? 'var(--faint)' : (on ? 'var(--orange)' : 'var(--muscle-base)');
+      var op = neutral ? '0.5' : (on ? '1' : '0.65');
+      if (t === 'e') return '<ellipse cx="'+s[2]+'" cy="'+s[3]+'" rx="'+s[4]+'" ry="'+s[5]+'" style="fill:'+fill+'" opacity="'+op+'"/>';
+      return '<rect x="'+s[2]+'" y="'+s[3]+'" width="'+s[4]+'" height="'+s[5]+'" rx="3" style="fill:'+fill+'" opacity="'+op+'"/>';
+    }).join('');
+    return '<figure class="bodyfig"><svg viewBox="0 0 60 145" width="100%" height="100%" aria-hidden="true">'+body+'</svg>'+
+      '<figcaption>'+label+'</figcaption></figure>';
+  }
+  function bodyDiagram(exId) {
+    var hi = MUS[exId] || [];
+    return '<div class="bodymap">'+figureSVG(BODY_FRONT, hi, 'Vorne')+figureSVG(BODY_BACK, hi, 'Hinten')+'</div>';
+  }
+
   /* ----------------------------------------------------------------------
      Übungsdatenbank
      equipment: "mindestens eines davon nötig" ([] = nur Körpergewicht).
@@ -311,6 +379,9 @@
       sessionMinutes: 45,    // Ziel-Dauer je Einheit
       theme: 'auto',         // auto | dark | light
       readiness: { date: '', level: 'normal' }, // Tages-Erholung (Autoregulation)
+      restDefault: 90,       // Standard-Satzpause (Sek) für Auto-Timer
+      lastSummary: null,     // Zusammenfassung der letzten Einheit (für Banner)
+      hideInstallHint: false,
       swaps: {},
       currentSession: null,
       history: []
@@ -402,6 +473,23 @@
     else if (!isNaN(lastR) && top && lastR >= top) next = lastW + incFor(ex.id);
     else next = lastW;
     return { last: lastW, lastReps: lp.reps, next: next, up: next > lastW, down: next < lastW };
+  }
+
+  // Geschätztes 1RM (Epley) und Bestwerte (PRs)
+  function epley(w, r) { w = parseFloat(w); r = parseInt(r, 10); if (isNaN(w) || w <= 0 || isNaN(r) || r <= 0) return 0; return w * (1 + r / 30); }
+  function round1(x) { return Math.round(x * 10) / 10; }
+  // bisheriger Bestwert für Übung, optional bis zu einem Index (exklusiv) der History
+  function prFor(exId, beforeIdx) {
+    var maxW = 0, best1 = 0;
+    for (var i = (beforeIdx == null ? 0 : beforeIdx); i < state.history.length; i++) {
+      var h = state.history[i]; if (!h.exercises) continue;
+      for (var j = 0; j < h.exercises.length; j++) {
+        var e = h.exercises[j]; if (e.id !== exId) continue;
+        var w = parseFloat(e.weight); if (!isNaN(w) && w > maxW) maxW = w;
+        var o = epley(e.weight, e.doneReps); if (o > best1) best1 = o;
+      }
+    }
+    return { maxW: maxW, best1: best1 };
   }
 
   /* ----------------------------------------------------------------------
@@ -545,18 +633,38 @@
     const s = state.currentSession; if (!s) return;
     const st = SESSIONS[s.type];
     const exercises = [];
+    var volume = 0, doneCount = 0, prs = [];
     if (!st.conditioning) {
       s.planned.forEach(function (pid) {
         const r = resolveExercise(pid); const e = s.entries[pid] || {};
-        exercises.push({ id:r.exercise.id, name:r.exercise.name, sets:r.exercise.sets, reps:r.exercise.reps, weight:e.weight||'', doneReps:e.reps||'', rpe:e.rpe||'' });
+        const rec = { id:r.exercise.id, name:r.exercise.name, sets:r.exercise.sets, reps:r.exercise.reps, weight:e.weight||'', doneReps:e.reps||'', rpe:e.rpe||'' };
+        exercises.push(rec);
+        if (e.done) doneCount++;
+        const w = parseFloat(e.weight), rp = parseInt(e.reps, 10);
+        if (!isNaN(w) && w > 0 && !isNaN(rp) && rp > 0) volume += w * rp;
+        // PR? gegen bisherige History (vor dem Hinzufügen)
+        if (!isNaN(w) && w > 0) {
+          const prev = prFor(r.exercise.id);
+          const e1 = epley(e.weight, e.reps);
+          if (w > prev.maxW || (e1 > 0 && e1 > prev.best1)) {
+            prs.push({ name: r.exercise.name, weight: w, reps: e.reps, e1rm: round1(e1) });
+            rec.pr = true;
+          }
+        }
       });
-    }
+    } else if (s.condDone) { doneCount = 1; }
+
     state.history.unshift({
       id: uid(), date: todayStr(), type: s.type, typeName: st.name,
       location: (activeLocation() || {}).name || '', minutes: state.sessionMinutes,
       exercises: exercises,
       conditioning: st.conditioning ? conditioningPlan().detail : null
     });
+    state.lastSummary = {
+      typeName: st.name, icon: st.icon, minutes: state.sessionMinutes,
+      doneCount: doneCount, total: st.conditioning ? 1 : s.planned.length,
+      volume: Math.round(volume), prs: prs, conditioning: !!st.conditioning
+    };
     state.currentSession = null; state.swaps = {};
     save(); location.hash = '#/'; render();
   }
@@ -727,6 +835,21 @@
     }).join('');
   }
 
+  function summaryBannerHTML() {
+    const sm = state.lastSummary; if (!sm) return '';
+    const prBlock = (sm.prs && sm.prs.length)
+      ? '<div class="sum-prs">'+sm.prs.map(function (p){ return '<div class="sum-pr">🏆 <b>'+esc(p.name)+'</b> '+fmtKg(p.weight)+' kg × '+esc(p.reps)+(p.e1rm?' · ≈1RM '+p.e1rm+' kg':'')+'</div>'; }).join('')+'</div>'
+      : '';
+    const stats = sm.conditioning
+      ? '<div class="sum-grid"><div><b class="tnum">'+sm.minutes+'′</b><span>Dauer</span></div><div><b>✓</b><span>Kondition</span></div></div>'
+      : '<div class="sum-grid"><div><b class="tnum">'+sm.doneCount+'/'+sm.total+'</b><span>erledigt</span></div>' +
+        '<div><b class="tnum">'+(sm.volume||0)+'</b><span>kg Volumen</span></div>' +
+        '<div><b class="tnum">'+(sm.prs?sm.prs.length:0)+'</b><span>neue PRs</span></div></div>';
+    return '<div class="card card--accent"><div class="row-between"><div class="row" style="gap:8px"><span style="font-size:1.4rem">'+esc(sm.icon||'✅')+'</span><h3 style="margin:0">Einheit abgeschlossen</h3></div>' +
+      '<button class="iconbtn" data-action="dismiss-summary" aria-label="Schließen" style="width:38px;height:38px;font-size:1.1rem">✕</button></div>' +
+      '<p class="small muted" style="margin:6px 0 10px">'+esc(sm.typeName)+'</p>'+stats+prBlock+'</div>';
+  }
+
   function readinessCardHTML() {
     const lvl = todayReadiness();
     const mods = effMods();
@@ -879,6 +1002,8 @@
       '<h1>'+(state.name ? 'Servus '+esc(state.name) : 'Dein Training')+'</h1></div>' +
       '<button class="iconbtn" data-action="cycle-theme" aria-label="Design wechseln">'+(state.theme==='light'?'☀️':state.theme==='dark'?'🌙':'◐')+'</button></div>' +
 
+      summaryBannerHTML() +
+
       (isDeload() ? '<div class="card card--steel"><strong>🔄 Deload-Woche (Woche '+programWeek()+')</strong>' +
         '<p class="small" style="margin:6px 0 0">Volumen &amp; Last sind bewusst reduziert – Technik und Erholung im Fokus. Nächste Woche wieder voll angreifen.</p></div>' : '') +
 
@@ -904,6 +1029,8 @@
       '<p class="small"><strong>Aufwärmen:</strong> '+WARMUP_TEXT+'</p><hr class="sep">' +
       '<p class="small"><strong>Sicherheit:</strong> Technik vor Gewicht. Bei echtem Schmerz (nicht Muskelkater) abbrechen. ' +
       'Nach Dienst/Nachtschicht Intensität anpassen.</p></div>' +
+
+      installHintHTML() +
 
       '</div>';
   }
@@ -1046,12 +1173,33 @@
         : '<p class="muted small">Trag bei Übungen Gewichte ein – dann erscheint hier die Kurve.</p>') +
       '<p class="small muted">'+esc(alt)+'</p></div>';
 
+    // Bestwerte (PRs)
+    var prMap = {};
+    state.history.forEach(function (h) {
+      (h.exercises || []).forEach(function (e) {
+        var w = parseFloat(e.weight); if (isNaN(w) || w <= 0) return;
+        var o = epley(e.weight, e.doneReps);
+        if (!prMap[e.id]) prMap[e.id] = { name: e.name, maxW: 0, best1: 0 };
+        if (w > prMap[e.id].maxW) prMap[e.id].maxW = w;
+        if (o > prMap[e.id].best1) prMap[e.id].best1 = o;
+        prMap[e.id].name = e.name;
+      });
+    });
+    var prArr = Object.keys(prMap).map(function (k){ return prMap[k]; })
+      .sort(function (a,b){ return b.best1 - a.best1; }).slice(0, 8);
+    var prCard = prArr.length
+      ? '<div class="card"><h3>🏆 Bestwerte</h3>'+prArr.map(function (p){
+          return '<div class="row-between" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><span>'+esc(p.name)+'</span>' +
+            '<span class="small tnum"><b>'+fmtKg(p.maxW)+' kg</b>'+(p.best1>0?' · ≈1RM '+round1(p.best1):'')+'</span></div>';
+        }).join('')+'<p class="small faint" style="margin:8px 0 0">1RM geschätzt (Epley-Formel) aus Gewicht × Wiederholungen.</p></div>'
+      : '';
+
     const items = state.history.map(function (h) {
       var lines;
       if (h.type === 'CONDITION') lines = '<ul><li>'+esc(h.conditioning || 'Ausdauereinheit')+'</li></ul>';
       else lines = '<ul>'+h.exercises.map(function (e) {
         var d = []; if (e.weight) d.push(e.weight+' kg'); if (e.doneReps) d.push(e.doneReps+' Wdh.');
-        return '<li>'+esc(e.name)+(d.length?' – '+esc(d.join(', ')):' – '+e.sets+'×'+e.reps)+'</li>';
+        return '<li>'+esc(e.name)+(e.pr?' 🏆':'')+(d.length?' – '+esc(d.join(', ')):' – '+e.sets+'×'+e.reps)+'</li>';
       }).join('')+'</ul>';
 
       var edit;
@@ -1074,7 +1222,7 @@
         '<span class="small muted tnum">'+formatDate(h.date)+'</span></div>'+metaTags+lines+edit+'</div>';
     }).join('');
 
-    return '<div class="view">'+header+chart+items+'</div>';
+    return '<div class="view">'+header+chart+prCard+items+'</div>';
   }
 
   function chartSeries() {
@@ -1145,7 +1293,12 @@
     return '<div class="view">' +
       '<div class="topbar"><div class="grow"><p class="eyebrow">Konfiguration</p><h1>Einstellungen</h1></div></div>' +
 
-      '<div class="card"><h3>Trainingsmenge</h3>'+freqDurationHTML()+'</div>' +
+      '<div class="card"><h3>Trainingsmenge</h3>'+freqDurationHTML()+
+      '<div class="card card--flat"><label>Standard-Satzpause (Auto-Timer)</label>' +
+      '<div class="stepper"><button data-action="rest-dec" aria-label="kürzer">–</button>' +
+      '<div class="val">'+(state.restDefault?state.restDefault:'Aus')+'<small>'+(state.restDefault?'SEKUNDEN':'KEIN TIMER')+'</small></div>' +
+      '<button data-action="rest-inc" aria-label="länger">+</button></div>' +
+      '<p class="small muted" style="margin:10px 0 0">Startet nach jedem abgehakten Satz automatisch. 0 = aus.</p></div></div>' +
 
       '<div class="card"><h3>Beschwerden</h3>' +
       '<p class="small muted" style="margin-bottom:10px">Betroffene Übungen werden automatisch sicher ersetzt. ' +
@@ -1196,12 +1349,21 @@
     const loadTags = ex.loads.map(function (l){ return '<span class="tag tag--load">belastet '+(COMPLAINTS[l]?COMPLAINTS[l].label:l)+'</span>'; }).join('');
     const steps = '<ol class="steps">'+ex.steps.map(function (s){ return '<li>'+esc(s)+'</li>'; }).join('')+'</ol>';
     const coach = ex.coach ? '<div class="coach">💡 '+esc(ex.coach)+'</div>' : '';
+    const musTags = (MUS[id]||[]).map(function (m){ return '<span class="tag">'+esc(MUSCLE_LABELS[m]||m)+'</span>'; }).join('');
+    const pr = prFor(id);
+    const prLine = pr.maxW > 0
+      ? '<div class="row-between" style="margin-top:4px"><span class="pill pill--orange">🏆 Bestwert '+fmtKg(pr.maxW)+' kg</span>' +
+        (pr.best1>0?'<span class="small muted tnum">≈ 1RM '+round1(pr.best1)+' kg</span>':'')+'</div>'
+      : '';
     return '<div class="view">' +
       '<div class="topbar"><a class="iconbtn" href="#/" aria-label="Zurück">‹</a>' +
       '<h1 style="font-size:1.2rem">'+esc(ex.name)+'</h1></div>' +
-      '<div class="hero-ex">'+(ex.emoji||'💪')+'</div>' +
+      '<div class="card"><div class="row-between" style="margin-bottom:4px"><h3 style="margin:0">Beanspruchte Muskeln</h3>' +
+      '<span style="font-size:1.6rem">'+(ex.emoji||'💪')+'</span></div>' +
+      bodyDiagram(id) +
+      '<div class="tags" style="margin-top:10px">'+musTags+'</div></div>' +
       '<div class="card stack"><div><h3>Zielmuskulatur</h3><p class="muted" style="margin:0">'+esc(ex.target)+'</p></div>' +
-      '<div><h3 style="margin-bottom:6px">Schema</h3><p class="tnum" style="margin:0">'+ex.sets+' Sätze × '+esc(ex.reps)+'</p></div>' +
+      '<div><h3 style="margin-bottom:6px">Schema</h3><p class="tnum" style="margin:0">'+ex.sets+' Sätze × '+esc(ex.reps)+'</p>'+prLine+'</div>' +
       '<div class="tags">'+eqTags+loadTags+'</div></div>' +
       '<div class="card"><h3>So geht’s</h3>'+steps+coach+'</div>' +
       '<div class="card stack"><p class="small muted">Kurzes Technik-Video? Öffnet eine YouTube-Suche (kein eigenes Hosting).</p>' +
@@ -1263,7 +1425,21 @@
       case 'toggle-cond': if (state.currentSession){ state.currentSession.condDone = !state.currentSession.condDone; save(); render(); } break;
       case 'toggle-ex': {
         const pid = el.getAttribute('data-id');
-        if (state.currentSession && state.currentSession.entries[pid]) { const e = state.currentSession.entries[pid]; e.done = !e.done; save(); render(); }
+        if (state.currentSession && state.currentSession.entries[pid]) {
+          const e = state.currentSession.entries[pid]; e.done = !e.done; save();
+          if (e.done && state.restDefault > 0) { ensureAudio(); startRest(state.restDefault); } // Auto-Pausentimer
+          render();
+        }
+        break;
+      }
+      case 'dismiss-summary': state.lastSummary = null; save(); render(); break;
+      case 'rest-dec': state.restDefault = Math.max(0, state.restDefault - 15); save(); render(); break;
+      case 'rest-inc': state.restDefault = Math.min(300, state.restDefault + 15); save(); render(); break;
+      case 'start-rest': ensureAudio(); startRest(state.restDefault || 90); break;
+
+      case 'dismiss-install': state.hideInstallHint = true; save(); render(); break;
+      case 'install-app': {
+        if (efDeferredPrompt) { efDeferredPrompt.prompt(); efDeferredPrompt.userChoice.finally(function () { efDeferredPrompt = null; render(); }); }
         break;
       }
       case 'swap': swapExercise(el.getAttribute('data-id')); render(); break;
@@ -1429,6 +1605,67 @@
   }
 
   /* ----------------------------------------------------------------------
+     PWA: Installation & Updates
+     ---------------------------------------------------------------------- */
+  var efReg = null, efDeferredPrompt = null, efRefreshing = false;
+
+  function isStandalone() {
+    try { return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; } catch (e) { return false; }
+  }
+  function isIOS() { return /iphone|ipad|ipod/i.test(navigator.userAgent); }
+
+  function toastDOM() {
+    var el = document.getElementById('ef-toast');
+    if (el) return el;
+    el = document.createElement('div'); el.id = 'ef-toast'; el.className = 'ef-toast hidden';
+    document.body.appendChild(el);
+    el.addEventListener('click', function (ev) {
+      var b = ev.target.closest('[data-action]'); if (!b) return;
+      var a = b.getAttribute('data-action');
+      if (a === 'sw-update') { if (efReg && efReg.waiting) efReg.waiting.postMessage({ type: 'SKIP_WAITING' }); hideToast(); }
+      else if (a === 'toast-close') hideToast();
+    });
+    return el;
+  }
+  function showToast(html) { var el = toastDOM(); el.innerHTML = html; el.classList.remove('hidden'); }
+  function hideToast() { var el = document.getElementById('ef-toast'); if (el) el.classList.add('hidden'); }
+
+  function installHintHTML() {
+    if (isStandalone() || state.hideInstallHint) return '';
+    var body = isIOS()
+      ? 'Installiere EinsatzFit als App: In Safari <b>Teilen</b> ⎋ antippen → <b>„Zum Home-Bildschirm"</b>.'
+      : 'Installiere EinsatzFit als App für Offline-Nutzung und Vollbild.';
+    var btn = (!isIOS() && efDeferredPrompt)
+      ? '<button class="btn btn--soft btn--sm" data-action="install-app">App installieren</button>' : '';
+    return '<div class="card card--steel"><div class="row-between"><div class="row" style="gap:8px"><span style="font-size:1.3rem">📲</span>' +
+      '<h3 style="margin:0">Als App installieren</h3></div>' +
+      '<button class="iconbtn" data-action="dismiss-install" aria-label="Schließen" style="width:36px;height:36px;font-size:1rem">✕</button></div>' +
+      '<p class="small" style="margin:8px 0 '+(btn?'10px':'0')+'">'+body+'</p>'+btn+'</div>';
+  }
+
+  function registerSW() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.register('sw.js').then(function (reg) {
+      efReg = reg;
+      if (reg.waiting && navigator.serviceWorker.controller) showUpdateToast();
+      reg.addEventListener('updatefound', function () {
+        var nw = reg.installing; if (!nw) return;
+        nw.addEventListener('statechange', function () {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) showUpdateToast();
+        });
+      });
+    }).catch(function () {});
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (efRefreshing) return; efRefreshing = true; location.reload();
+    });
+  }
+  function showUpdateToast() {
+    showToast('<span>🔄 Neue Version verfügbar.</span>' +
+      '<button class="btn btn--sm" data-action="sw-update">Aktualisieren</button>' +
+      '<button class="iconbtn" data-action="toast-close" aria-label="Schließen" style="width:34px;height:34px">✕</button>');
+  }
+
+  /* ----------------------------------------------------------------------
      Init
      ---------------------------------------------------------------------- */
   function init() {
@@ -1440,10 +1677,15 @@
     app.addEventListener('change', onChange);
     app.addEventListener('keydown', onKey);
     window.addEventListener('hashchange', render);
+
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault(); efDeferredPrompt = e;
+      if (state.onboarded && parseHash().route === 'home') render();
+    });
+    window.addEventListener('appinstalled', function () { efDeferredPrompt = null; state.hideInstallHint = true; save(); });
+
     render();
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
-    }
+    if ('serviceWorker' in navigator) window.addEventListener('load', registerSW);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

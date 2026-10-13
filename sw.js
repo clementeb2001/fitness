@@ -1,6 +1,6 @@
 /* EinsatzFit – Service Worker. Cache-first für Offline-Nutzung.
    Bei Datei-Änderungen CACHE-Version erhöhen → alte Caches werden ersetzt. */
-const CACHE = 'einsatzfit-v3';
+const CACHE = 'einsatzfit-v4';
 
 const ASSETS = [
   './',
@@ -15,6 +15,11 @@ const ASSETS = [
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
   self.skipWaiting();
+});
+
+// Erlaubt der App, ein wartendes Update sofort zu aktivieren.
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
