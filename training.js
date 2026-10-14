@@ -46,6 +46,31 @@
     else if (easy && sets.length >= (previous.targetSets || ex.sets)) { next += increment; reason = 'Alle Zielsätze erreicht, RPE ≤ 8: kleine Steigerung vorgeschlagen.'; }
     return {last:weight, next, reason, lastReps:sets.map(s=>s.reps).join('/'),up:next>weight,down:next<weight};
   }
+  function fillPrevious(rows, previous, load=1) {
+    return rows.map((row,i)=>{
+      const old=previous[i];if(row.done||!old)return {...row};
+      return {...row,weight:row.weight!==''?row.weight:(num(old.weight)>0?String(Math.floor(num(old.weight)*Math.min(1,Math.max(0,load))*2)/2):''),reps:row.reps!==''?row.reps:String(old.reps),rpe:row.rpe};
+    });
+  }
+  function series(history, ex, metric) {
+    if(!ex)return [];
+    return history.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(h=>{
+      const entries=(h.exercises||[]).filter(e=>e.id===ex.id), sets=entries.flatMap(completed);
+      let values=sets.map(s=>metric==='oneRM'?oneRM(s.weight,s.reps,ex):num(metric==='weight'?s.weight:s.reps)).filter(v=>Number.isFinite(v)&&v>0);
+      const value=metric==='volume'?entries.reduce((n,e)=>n+volume(e,ex),0):values.length?Math.max(...values):0;
+      return {date:h.date,max:value};
+    }).filter(p=>p.max>0);
+  }
+  function weeklyActivity(history, today) {
+    const date=new Date(today+'T12:00:00Z');date.setUTCDate(date.getUTCDate()-(date.getUTCDay()+6)%7);
+    return Array.from({length:8},(_,i)=>{
+      const start=new Date(date);start.setUTCDate(start.getUTCDate()-(7-i)*7);
+      const end=new Date(start);end.setUTCDate(end.getUTCDate()+7);
+      const key=start.toISOString().slice(0,10), limit=end.toISOString().slice(0,10);
+      const entries=history.filter(h=>h.date>=key&&h.date<limit&&h.date<=today);
+      return {date:key,count:entries.length,minutes:entries.reduce((n,h)=>n+(Number(h.minutes)||0),0)};
+    });
+  }
   function normalize(raw, defaults, exercises, sessions, equipment) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw Error('Ungültiger Datenaufbau');
     if (!Array.isArray(raw.locations) || !Array.isArray(raw.history)) throw Error('Orte oder Verlauf fehlen');
@@ -54,6 +79,10 @@
     const date = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(Date.parse(v)) && new Date(v).toISOString().slice(0,10)===v;
     const clamp = (v,min,max,fallback) => Number.isFinite(Number(v)) ? Math.min(max,Math.max(min,Number(v))) : fallback;
     const out = {...defaults};
+    out.focus=['balanced','strength','endurance'].includes(raw.focus)?raw.focus:'balanced';
+    out.experience=['beginner','regular'].includes(raw.experience)?raw.experience:'regular';
+    out.winterPrep=raw.winterPrep!==false;
+    out.lastBackupAt=typeof raw.lastBackupAt==='string'&&Number.isFinite(Date.parse(raw.lastBackupAt))?raw.lastBackupAt:'';
     out.name=text(raw.name); out.complaintsText=text(raw.complaintsText,1000); out.onboarded=raw.onboarded===true;
     out.frequency=Math.round(clamp(raw.frequency,2,6,4)); out.sessionMinutes=Math.round(clamp(raw.sessionMinutes,20,75,45));
     out.restDefault=Math.round(clamp(raw.restDefault,0,300,90));
@@ -84,5 +113,5 @@
     }
     return out;
   }
-  root.Training={unit,upper,oneRM,completed,volume,validSet,suggestion,normalize};
+  root.Training={unit,upper,oneRM,completed,volume,validSet,suggestion,normalize,fillPrevious,series,weeklyActivity};
 })(typeof window==='undefined'?globalThis:window);

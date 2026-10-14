@@ -561,3 +561,21 @@ body.has-timer .view--full { padding-bottom: calc(env(safe-area-inset-bottom, 0p
 .timer-options { max-width: 580px; margin: 5px auto 0; }
 .timer-options > summary { min-height: 30px; padding: 5px 2px; font-size: .75rem; }
 body.has-timer .view--full { padding-bottom: calc(var(--timer-height, 140px) + 24px); }
+
+/* Training workflow: accessible choices, scoped undo, compact trends. */
+.swap-dialog { color:var(--text); background:var(--bg); border:1px solid var(--line); border-radius:20px; padding:22px; width:min(520px, calc(100vw - 24px)); max-height:85dvh; overflow:auto; }
+.swap-dialog::backdrop { background:rgba(0,0,0,.65); }
+.alternative-option { display:flex; flex-direction:column; align-items:flex-start; gap:6px; width:100%; padding:15px; margin:10px 0; border:1px solid var(--line); border-radius:12px; background:var(--card-2); color:inherit; text-align:left; cursor:pointer; }
+.alternative-option:not(:disabled):hover { border-color:var(--orange); }
+.alternative-option:disabled { opacity:.55; cursor:not-allowed; }
+.alternative-option small { color:var(--muted); }
+.undo-bar { position:fixed; z-index:80; left:50%; transform:translateX(-50%); top:max(12px,env(safe-area-inset-top)); width:min(560px,calc(100% - 24px)); display:flex; align-items:center; gap:10px; padding:10px 14px; color:var(--text); background:var(--bg); border:1px solid var(--orange); border-radius:14px; box-shadow:0 8px 24px #0004; }
+.undo-bar span { flex:1; font-size:.85rem; }
+.activity-weeks { display:grid; grid-template-columns:repeat(8,minmax(0,1fr)); gap:4px; margin:18px 0; }
+.activity-weeks > div { display:flex; flex-direction:column; align-items:center; gap:7px; padding:12px 2px; border-radius:10px; background:var(--card-2); border:1px solid var(--line); }
+.activity-weeks strong { color:var(--orange); font-size:1.4rem; }
+.activity-weeks span,.activity-weeks small { font-size:.65rem; color:var(--muted); white-space:nowrap; }
+.plan-explanation summary { cursor:pointer; font-weight:700; min-height:28px; }
+.plan-explanation li { margin:8px 0; }
+:focus-visible { outline:3px solid var(--orange); outline-offset:3px; }
+@media (max-width:360px) { .activity-weeks { gap:2px; } .activity-weeks small { font-size:.55rem; } .undo-bar { gap:6px; padding:8px; } }

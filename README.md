@@ -79,3 +79,16 @@ Tests: `node --test tests/training.test.cjs` (Node 20 oder neuer, keine Abhängi
 [Review und Änderungen](REVIEW-CLAUDE.md): Inline-Vorschauen, Trainingsfortschritt, wiederherstellbarer kompakter Timer, barrierefreie Detail-Tabs und automatisch versionierte Offline-Updates. Die [iOS-Anleitung](NATIVE-IOS.md) beschreibt den Stand der nativen Vorbereitung und die offenen Gerätetests.
 
 Web-Deployment: `node scripts/web-build.mjs` erzeugt `_site/` mit einer aus dem Inhalt berechneten Cache-Kennung. Native Vorbereitung: `pnpm install --frozen-lockfile && pnpm run web:build`. Tests: `node --test tests/*.test.cjs`.
+
+## Trainingsablauf und Fortschritt (Oktober 2026)
+
+- Einstellungen → Trainingsprofil: ausgewogene Einsatzfitness, mehr Kraft oder mehr Ausdauer; Einstieg reduziert die Satzzahl. Die Ski-Ergänzung ist abschaltbar. „Warum dieser Plan?“ erklärt die Auswahl.
+- „Letzte Werte übernehmen“ füllt ausschließlich leere Felder mit früheren Satzwerten. Tagesform reduziert dabei gegebenenfalls die Last. RPE wird nicht übernommen, Sätze werden nicht automatisch als erledigt markiert.
+- „Tauschen“ öffnet eine gezielte Auswahl mit Material-/Belastungshinweisen. „Später machen“ verschiebt die Übung samt Eingaben ans Ende. Der nächste offene Satz ist direkt erreichbar.
+- Rückgängig gilt für den letzten unterstützten Vorgang in der aktuellen Sitzung: Werteübernahme, Übungstausch, Verschieben, Satzentfernung, Trainingsabschluss/-verwerfen und Löschen eines Verlaufseintrags. Weitere Eingaben können die Rücknahme ungültig machen. Nach Neuladen bleibt der lokale Sicherungspunkt verfügbar, nicht die Rückgängig-Aktion.
+- Verlauf: acht Kalenderwochen Aktivität sowie je Übung Wiederholungen/Dauer/Distanz, Zusatzgewicht, Volumen und geschätztes 1RM. Vergleich bei gleicher Ausführung und Ausrüstung; keine automatische Leistungsdiagnose.
+- Vor Import, Abschluss, Verwerfen oder Zurücksetzen entsteht ein lokaler Sicherungspunkt. Wiederherstellung sichert wiederum den bisherigen Stand. Das ersetzt keine exportierte Backup-Datei und keine Synchronisierung.
+
+GitHub Pages muss als Quelle **GitHub Actions** verwenden. Der Deployment-Build erzeugt die Inhaltskennung des Offline-Caches. Artefaktnamen enthalten die Laufversuchsnummer, damit Wiederholungen keine gleichnamigen Artefakte verwechseln.
+
+Zusätzlicher Browsertest: `node tests/experience-browser.cjs` bei laufendem lokalen Server auf Port 8765 und installiertem Playwright. `PLAYWRIGHT_EXECUTABLE_PATH` kann einen vorhandenen Chromium-Pfad angeben. Die Tests verwenden isolierte Browserdaten.
