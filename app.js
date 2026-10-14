@@ -27,8 +27,21 @@
     matte:          { label: 'Matte',           icon: '🟦' },
     cardio:         { label: 'Cardiogerät',     icon: '🚣' },
     rucksack:       { label: 'Rucksack / Last', icon: '🎒' },
-    springseil:     { label: 'Springseil',      icon: '➰' }
+    springseil:     { label: 'Springseil',      icon: '➰' },
+    trap_bar:       { label: 'Trap-Bar',        icon: '🏋️' },
+    ez_stange:      { label: 'EZ-Stange',       icon: '🏋️' },
+    hantelbank:     { label: 'Hantelbank',      icon: '🛋️' },
+    dip_barren:     { label: 'Dip-Barren',      icon: '🤸' },
+    trx:            { label: 'Schlingentrainer',icon: '🪢' },
+    medizinball:    { label: 'Medizinball',     icon: '⚽' },
+    sandsack:       { label: 'Sandsack',        icon: '💼' },
+    ab_roller:      { label: 'Bauchroller',     icon: '🛞' },
+    seilzug:        { label: 'Kabelzug',        icon: '🏗️' },
+    laufband:       { label: 'Laufband',        icon: '🏃' },
+    ergometer:      { label: 'Ergometer',       icon: '🚴' }
   };
+  // Geräte mit einstellbarem Gewichts-Vorrat (für die Vorschlag-Einrastung)
+  const WEIGHTED_EQUIP = ['kurzhanteln','langhantel','kettlebell','gewichtsweste','trap_bar','ez_stange'];
 
   const COMPLAINTS = {
     ruecken:     { label: 'Rücken',      icon: '🔙' },
@@ -380,11 +393,14 @@
      State
      ---------------------------------------------------------------------- */
   function defaultLocations() {
+    const range = (a,b,s) => { const r=[]; for (let v=a; v<=b+1e-9; v=Math.round((v+s)*100)/100) r.push(Math.round(v*100)/100); return r; };
     return [
       { id: uid(), name: 'Wache', icon: '🏢',
-        equipment: ['langhantel','kurzhanteln','kettlebell','klimmzugstange','cardio','box','matte','band','gewichtsweste'] },
+        equipment: ['langhantel','kurzhanteln','kettlebell','klimmzugstange','cardio','box','matte','band','gewichtsweste'],
+        inv: { langhantel: range(20,150,2.5), kurzhanteln: range(2.5,40,2.5), kettlebell: [8,12,16,20,24,28,32], gewichtsweste: [5,10,15,20] } },
       { id: uid(), name: 'Zuhause', icon: '🏠',
-        equipment: ['kurzhanteln','band','matte','springseil'] },
+        equipment: ['kurzhanteln','band','matte','springseil'],
+        inv: { kurzhanteln: [5,7.5,10,12.5,15,17.5,20,22.5,25] } },
       { id: uid(), name: 'Unterwegs', icon: '🎒', equipment: [] }
     ];
   }
@@ -484,10 +500,28 @@
     return { count: r.count - d, set: r.set - d - (state.experience === "beginner" ? 1 : 0), load: Math.min(r.load, d ? 0.9 : 1), tone: r.tone, label: r.label, icon: r.icon, deload: !!d };
   }
 
-  // Vorschlag fürs nächste Gewicht aus letzter Leistung + Tagesform
+  function toNum(v){ const n=parseFloat(String(v).replace(',','.')); return Number.isFinite(n)?n:NaN; }
+  // verfügbare Gewichte für diese Übung am aktiven Ort (erste passende Geräteliste)
+  function achievableFor(ex){
+    const loc=activeLocation(), inv=loc&&loc.inv; if(!inv) return null;
+    const avail=availableEquip();
+    for(const e of (ex.equipment||[])){ if(avail.includes(e)&&inv[e]&&inv[e].length) return inv[e]; }
+    return null;
+  }
+  function snapLoad(w, list){
+    if(!Array.isArray(list)||!list.length) return w;
+    if(w<=list[0]) return list[0];
+    var best=list[0];
+    for(const v of list){ if(v<=w+1e-9) best=v; }
+    return best;
+  }
+  // Vorschlag fürs nächste Gewicht; rastet auf tatsächlich verfügbare Gewichte ein
   function suggestNext(ex) {
     const lp=lastPerfFor(ex.id);
-    return lp ? Training.suggestion(ex,lp,effMods().load) : null;
+    const sg = lp ? Training.suggestion(ex,lp,effMods().load) : null;
+    if(sg){ const list=achievableFor(ex); if(list){ const snapped=snapLoad(sg.next,list);
+      if(Math.abs(snapped-sg.next)>1e-9){ sg.next=snapped; sg.snapped=true; sg.up=snapped>sg.last; sg.down=snapped<sg.last; } } }
+    return sg;
   }
 
   // Geschätztes 1RM (Epley) und Bestwerte (PRs)
@@ -910,6 +944,28 @@
       '<div class="chips">'+chips+'</div>'+note+'</div>';
   }
 
+  function invEditorHTML(loc){
+    const eqs = WEIGHTED_EQUIP.filter(e=>loc.equipment.includes(e));
+    if(!eqs.length) return '';
+    const inv = loc.inv||{};
+    return '<hr class="sep"><div class="small" style="font-weight:700">Verfügbare Gewichte (optional)</div>' +
+      '<p class="small faint" style="margin:4px 0 0">Trage ein, welche Gewichte es hier gibt – dann rasten die Gewichts­vorschläge auf machbare Werte ein.</p>' +
+      eqs.map(function(eq){
+        const list=inv[eq]||[];
+        const total = (eq==='langhantel'||eq==='trap_bar'||eq==='ez_stange');
+        const chips = list.length
+          ? list.map(function(v){ return '<button class="chip" data-action="inv-remove" data-id="'+loc.id+'" data-eq="'+eq+'" data-val="'+v+'" aria-label="'+fmtKg(v)+' kg entfernen">'+fmtKg(v)+' ✕</button>'; }).join('')
+          : '<span class="small faint">noch keine – unten erzeugen</span>';
+        return '<div style="margin-top:12px"><div class="small" style="font-weight:600">'+EQUIP[eq].icon+' '+esc(EQUIP[eq].label)+(total?' · Gesamtgewicht':' · pro Stück')+'</div>' +
+          '<div class="chips" style="margin-top:6px">'+chips+'</div>' +
+          '<div class="inline-fields" style="margin-top:6px">' +
+          '<div class="field"><input inputmode="decimal" id="invmin-'+loc.id+'-'+eq+'" placeholder="'+(total?'z.B. 20':'z.B. 5')+'"></div>' +
+          '<div class="field"><input inputmode="decimal" id="invmax-'+loc.id+'-'+eq+'" placeholder="bis"></div>' +
+          '<div class="field"><input inputmode="decimal" id="invstep-'+loc.id+'-'+eq+'" placeholder="Schritt"></div>' +
+          '<button class="btn btn--soft btn--sm" data-action="inv-gen" data-id="'+loc.id+'" data-eq="'+eq+'" style="flex:0 0 auto">Erzeugen</button></div></div>';
+      }).join('');
+  }
+
   function locationsEditorHTML() {
     return state.locations.map(function (loc) {
       const open = editLocationId === loc.id;
@@ -931,6 +987,7 @@
             return '<button class="chip" aria-pressed="'+(on?'true':'false')+'" data-action="toggle-loc-equip" data-id="'+loc.id+'" data-eq="'+eq+'">' +
               EQUIP[eq].icon+' '+esc(EQUIP[eq].label)+'</button>';
           }).join('') + '</div>' +
+          invEditorHTML(loc) +
           '<div class="btn-row" style="margin-top:14px">' +
           '<button class="btn btn--crit btn--sm" data-action="remove-loc" data-id="'+loc.id+'">Ort löschen</button></div>';
       }
@@ -1166,7 +1223,7 @@
         } else {
           const arrow = sg.up ? '↑' : (sg.down ? '↓' : '→');
           progLine = '<div class="last-line">Letztes Mal: <b>'+fmtKg(sg.last)+' kg</b>'+(sg.lastReps?' × '+esc(sg.lastReps):'') +
-            ' <button class="sug" data-action="apply-suggest" data-id="'+res.plannedId+'" data-w="'+sg.next+'">Vorschlag '+fmtKg(sg.next)+' kg '+arrow+'</button><p class="small muted">'+esc(sg.reason)+'</p></div>';
+            ' <button class="sug" data-action="apply-suggest" data-id="'+res.plannedId+'" data-w="'+sg.next+'">Vorschlag '+fmtKg(sg.next)+' kg '+arrow+(sg.snapped?' ✓':'')+'</button><p class="small muted">'+esc(sg.reason)+(sg.snapped?' Auf verfügbares Gewicht gerundet.':'')+'</p></div>';
         }
       }
     }
@@ -1553,6 +1610,32 @@
       case 'add-loc': {
         const inp = document.getElementById('newLocInput');
         if (inp && inp.value.trim()) { const nl = { id:uid(), name:inp.value.trim(), icon:'📍', equipment:[] }; state.locations.push(nl); editLocationId = nl.id; save(); render(); }
+        break;
+      }
+      case 'inv-gen': {
+        const lid = el.getAttribute('data-id'), eq = el.getAttribute('data-eq');
+        const loc = state.locations.find(function (l){ return l.id === lid; }); if (!loc) break;
+        const mn = toNum((document.getElementById('invmin-'+lid+'-'+eq)||{}).value);
+        const mx = toNum((document.getElementById('invmax-'+lid+'-'+eq)||{}).value);
+        let st = toNum((document.getElementById('invstep-'+lid+'-'+eq)||{}).value);
+        if (!Number.isFinite(mn) || !Number.isFinite(mx) || mn <= 0 || mx < mn) { alert('Bitte gültige Werte für „von“ und „bis“ eingeben.'); break; }
+        if (!Number.isFinite(st) || st <= 0) st = 2.5;
+        const add = []; for (let v = mn; v <= mx + 1e-9 && add.length < 80; v += st) add.push(Math.round(v*100)/100);
+        loc.inv = loc.inv || {};
+        const merged = [...new Set([...(loc.inv[eq]||[]), ...add])].filter(v => v>0 && v<=500).sort((a,b)=>a-b).slice(0,80);
+        if (merged.length) loc.inv[eq] = merged; else delete loc.inv[eq];
+        if (!Object.keys(loc.inv).length) delete loc.inv;
+        save(); render(); break;
+      }
+      case 'inv-remove': {
+        const lid = el.getAttribute('data-id'), eq = el.getAttribute('data-eq'), val = toNum(el.getAttribute('data-val'));
+        const loc = state.locations.find(function (l){ return l.id === lid; });
+        if (loc && loc.inv && loc.inv[eq]) {
+          loc.inv[eq] = loc.inv[eq].filter(v => Math.abs(v - val) > 1e-9);
+          if (!loc.inv[eq].length) delete loc.inv[eq];
+          if (!Object.keys(loc.inv).length) delete loc.inv;
+          save(); render();
+        }
         break;
       }
       case 'remove-loc': {

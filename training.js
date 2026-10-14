@@ -2,6 +2,17 @@
 (function(root) {
   'use strict';
   const num = v => Number(String(v).replace(',', '.'));
+  // Verfügbare Gewichte je Ort und Gerät (für Vorschlag-Einrastung). Streng validiert.
+  const WEIGHTED = ['kurzhanteln','langhantel','kettlebell','gewichtsweste','trap_bar','ez_stange'];
+  function cleanInv(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+    const list = a => Array.isArray(a)
+      ? [...new Set(a.map(num).filter(v => Number.isFinite(v) && v > 0 && v <= 500).map(v => Math.round(v*100)/100))].sort((x,y)=>x-y).slice(0,80)
+      : [];
+    const out = {};
+    for (const k of WEIGHTED) { const v = list(raw[k]); if (v.length) out[k] = v; }
+    return Object.keys(out).length ? out : undefined;
+  }
   function unit(ex) {
     const target=ex.reps.split('(')[0]; // Parentheses can contain tempo cues, not the logged unit.
     if (/Sek/.test(target)) return 'Sek.';
@@ -88,7 +99,7 @@
     out.restDefault=Math.round(clamp(raw.restDefault,0,300,90));
     out.theme=['auto','dark','light'].includes(raw.theme)?raw.theme:'auto';
     out.hideInstallHint=raw.hideInstallHint===true;
-    out.locations=raw.locations.filter(l=>l && id(l.id) && Array.isArray(l.equipment)).map(l=>({id:l.id,name:text(l.name)||'Ort',icon:text(l.icon,8)||'📍',equipment:l.equipment.filter(e=>Object.hasOwn(equipment,e))}));
+    out.locations=raw.locations.filter(l=>l && id(l.id) && Array.isArray(l.equipment)).map(l=>({id:l.id,name:text(l.name)||'Ort',icon:text(l.icon,8)||'📍',equipment:l.equipment.filter(e=>Object.hasOwn(equipment,e)),inv:cleanInv(l.inv)}));
     out.locations=out.locations.filter((l,i,a)=>a.findIndex(x=>x.id===l.id)===i);
     if (!out.locations.length) out.locations=defaults.locations;
     out.activeLocationId=out.locations.some(l=>l.id===raw.activeLocationId)?raw.activeLocationId:out.locations[0].id;

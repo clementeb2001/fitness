@@ -52,6 +52,17 @@ test('malformed imports are rejected or sanitized, IDs cannot inject markup',()=
  const raw={...A.defaultState(),frequency:999,theme:'evil',history:[{id:'"><img>',date:'2026-10-12',type:'KRAFT_A'}],locations:[{id:'bad"',name:'bad',equipment:[]}]};
  const n=T.normalize(raw,A.defaultState(),A.EX,A.SESSIONS,A.EQUIP);assert.equal(n.history.length,0);assert.equal(n.frequency,6);assert.equal(n.theme,'auto');assert.ok(n.locations.length);
 });
+test('verfügbare Gewichte werden validiert, dedupliziert und bleiben erhalten',()=>{
+ const d=A.defaultState();
+ const raw={...d,onboarded:true,history:[],locations:[{id:'loc1',name:'Zuhause',icon:'🏠',equipment:['kurzhanteln'],inv:{kurzhanteln:['10','5',5,0,-3,12.5,600,'abc'],langhantel:[20,22.5],matte:[10]}}]};
+ const n=T.normalize(raw,A.defaultState(),A.EX,A.SESSIONS,A.EQUIP);
+ const loc=n.locations.find(l=>l.id==='loc1');
+ assert.deepEqual(loc.inv.kurzhanteln,[5,10,12.5]);
+ assert.deepEqual(loc.inv.langhantel,[20,22.5]);
+ assert.ok(!('matte' in loc.inv));
+ const empty=T.normalize({...d,history:[],locations:[{id:'loc2',name:'Leer',equipment:[],inv:{band:[5]}}]},A.defaultState(),A.EX,A.SESSIONS,A.EQUIP);
+ assert.equal(empty.locations[0].inv,undefined);
+});
 test('equipment and complaint fallback never claims unsupported exercises safe',()=>{
  const s=A.defaultState();s.locations=[{id:'test',name:'Test',equipment:[]}];s.activeLocationId='test';A.setState(s);
  assert.equal(A.resolveExercise('bench_press').exercise.id,'pushup');
