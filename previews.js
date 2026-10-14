@@ -110,6 +110,24 @@
   add('lateral_band_walk',[squat,squat.map(p=>[p[0]+30,p[1]]),squat],'<path d="M141 172L175 165"/>');
   add('single_leg_balance',[marchA]);
   add('wall_sit',[sit],'<path d="M86 31V211"/>');
+  // Stufe 2: zusätzliche Übungen (Bewegungen aus vorhandenen Grundformen)
+  const latUp=pose({3:[112,96],4:[86,92],5:[188,96],6:[214,92]});
+  add('front_squat',[rack,rackSquat,rack],'',true);
+  add('sumo_deadlift',[stand,hinge,stand],'',true);
+  add('good_morning',[stand,hinge,stand]);
+  add('reverse_lunge',[stand,mirror(lunge),stand]);
+  add('incline_db_press',[pressLow,pressHigh,pressLow],'',true);
+  add('hammer_curl',[stand,curl,stand],'',true);
+  add('chinup',[hang,pulled,hang],bar);
+  add('trx_row',[inv,invUp,inv],'<path d="M150 18V70"/>');
+  add('reverse_fly',[reach,reachBack,reach],'',true);
+  add('diamond_pushup',[floor,floorLow,floor]);
+  add('lateral_raise',[stand,latUp,stand],'',true);
+  add('sandbag_squat',[reach,squat,reach],'',true);
+  add('sandbag_carry',[marchA,marchB,marchA],'',true);
+  add('bear_crawl',[dog,dogReach,dog]);
+  add('broad_jump',[squat,stepTop,stand],'',false,4);
+  add('flutter_kick',[legs,legsUp,legs]);
   const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   function html(ex) {
     return '<section class="movement" data-preview="'+ex.id+'" aria-label="Bewegungsvorschau '+esc(ex.name)+'"><div class="row-between"><span class="eyebrow">Bewegung verstehen</span><span class="pill pill--steel">Offline verfügbar</span></div><svg viewBox="0 0 300 235" role="img" aria-label="Schematische Bewegung: '+esc(ex.name)+'"><path d="M25 214H275" stroke="currentColor" opacity=".15"/><g class="movement-props" fill="none" stroke="currentColor" stroke-width="5">'+map[ex.id].props+'</g><g class="movement-person"></g></svg><div class="preview-controls"><button class="btn btn--soft btn--sm" data-preview-action="play">▶ Abspielen</button><button class="btn btn--muted btn--sm" data-preview-action="step">Schritt weiter</button><select aria-label="Vorschaugeschwindigkeit" data-preview-speed><option value="1">Normales Tempo</option><option value="0.5">Langsam</option></select></div><p class="small muted">Schematische '+(map[ex.id].frames.length===1?'Halteposition':'Bewegungsfolge')+' · '+esc(ex.name)+'. Geräte und Körperproportionen vereinfacht; beachte die Anleitung darunter.</p></section>';
