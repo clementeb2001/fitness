@@ -10,7 +10,7 @@ const timerStorage=new Map();
 const context={localStorage:{getItem:k=>timerStorage.get(k)||null,setItem:(k,v)=>timerStorage.set(k,v),removeItem:k=>timerStorage.delete(k)},window:{},document:{readyState:'loading',addEventListener(){},getElementById(){return null}},navigator:{},console,Training:T,Date,Math,alert(){},setTimeout,clearTimeout,setInterval,clearInterval};
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(path.join(dir,'previews.js'),'utf8'),context);
-const source=fs.readFileSync(path.join(dir,'app.js'),'utf8').replace('  if (document.readyState', '  window.testAPI={EX,SESSIONS,EQUIP,defaultState,resolveExercise,scaledExercises,sessionsThisWeek,weekStreak,effMods,tickTimer,ef,restoreTimer,persistTimer,stopTimer,setState:s=>state=s};\n  if (document.readyState');
+const source=fs.readFileSync(path.join(dir,'app.js'),'utf8').replace('  if (document.readyState', '  window.testAPI={EX,SESSIONS,EQUIP,defaultState,resolveExercise,scaledExercises,weeklyPlan,sessionsThisWeek,weekStreak,effMods,tickTimer,ef,restoreTimer,persistTimer,stopTimer,setState:s=>state=s};\n  if (document.readyState');
 vm.runInContext(source,context);
 const A=context.window.testAPI;
 test('every catalog exercise has an offline movement preview',()=>{
@@ -81,4 +81,43 @@ test('timer restores matching workout deadline and rejects another session or in
  timerStorage.set(key,JSON.stringify({session:'another',mode:'rest',phase:'rest',deadline:Date.now()+45000}));A.restoreTimer();assert.equal(A.ef.running,false);
  timerStorage.set(key,JSON.stringify({session:state.currentSession.startedAt,mode:'interval',phase:'work',deadline:Date.now()-1,work:0,rest:0,round:1,rounds:5}));A.restoreTimer();assert.equal(A.ef.running,false);
  timerStorage.clear();
+});
+
+test('copy previous sets fills blanks only, does not mark completion or copy effort',()=>{
+ const rows=[{weight:'',reps:'',rpe:'',done:false},{weight:'25',reps:'9',rpe:'7',done:false},{weight:'10',reps:'5',rpe:'8',done:true}];
+ const prev=rows.map(()=>({weight:'40',reps:'12',rpe:'10',done:true}));
+ const next=T.fillPrevious(rows,prev,.9);
+ assert.deepEqual(next[0],{weight:'36',reps:'12',rpe:'',done:false});
+ assert.deepEqual(next[1],rows[1]);assert.deepEqual(next[2],rows[2]);assert.equal(rows[0].weight,'');
+ assert.deepEqual(T.fillPrevious(rows,[]),rows);
+});
+test('exercise trends separate weight, repetitions, volume and estimated 1RM',()=>{
+ const ex=A.EX.bench_press;
+ const history=[{date:'2026-10-14',exercises:[{id:ex.id,setLog:[{weight:'40',reps:'10',done:true},{weight:'100',reps:'5',done:false}]}]},{date:'2026-10-12',exercises:[{id:ex.id,setLog:[{weight:'20',reps:'12',done:true}]}]}];
+ assert.deepEqual(T.series(history,ex,'weight').map(p=>p.max),[20,40]);
+ assert.deepEqual(T.series(history,ex,'volume').map(p=>p.max),[240,400]);
+ assert.deepEqual(T.series(history,ex,'reps').map(p=>p.max),[12,10]);
+ assert.ok(T.series(history,ex,'oneRM')[1].max>53);
+ assert.deepEqual(T.series(history,A.EX.plank,'volume'),[]);
+});
+test('activity weeks handle year boundaries and ignore future entries',()=>{
+ const h=[{date:'2025-12-29',minutes:25},{date:'2026-01-04',minutes:30},{date:'2026-01-05',minutes:40},{date:'2026-01-08',minutes:80}];
+ const weeks=T.weeklyActivity(h,'2026-01-06');
+ assert.equal(weeks.length,8);assert.equal(weeks[6].date,'2025-12-29');assert.equal(weeks[6].count,2);assert.equal(weeks[6].minutes,55);assert.equal(weeks[7].count,1);
+});
+test('new profile settings survive backup migration with safe defaults',()=>{
+ const base=A.defaultState();const data={...base,focus:'endurance',experience:'beginner',winterPrep:false,lastBackupAt:'2026-10-14T10:00:00Z'};
+ const result=T.normalize(data,base,A.EX,A.SESSIONS,A.EQUIP);
+ assert.equal(result.focus,'endurance');assert.equal(result.experience,'beginner');assert.equal(result.winterPrep,false);assert.equal(result.lastBackupAt,data.lastBackupAt);
+ const old=T.normalize({...base,focus:'<bad>',experience:'expert',winterPrep:undefined},base,A.EX,A.SESSIONS,A.EQUIP);
+ assert.equal(old.focus,'balanced');assert.equal(old.experience,'regular');assert.equal(old.winterPrep,true);
+});
+
+test('focus and experience change actual planning, winter option is respected',()=>{
+ const s=A.defaultState();s.winterPrep=false;s.focus='strength';A.setState(s);
+ assert.deepEqual(Array.from(A.weeklyPlan(4,true)),['KRAFT_A','KRAFT_B','GANZ','CONDITION']);
+ s.focus='endurance';assert.deepEqual(Array.from(A.weeklyPlan(4,true)),['KRAFT_A','GANZ','CONDITION','CONDITION']);
+ s.experience='beginner';assert.equal(A.effMods().set,-1);
+ s.focus='balanced';s.winterPrep=true;assert.ok(A.weeklyPlan(5,true).includes('SKIPREP'));
+ s.winterPrep=false;assert.ok(!A.weeklyPlan(5,true).includes('SKIPREP'));
 });
